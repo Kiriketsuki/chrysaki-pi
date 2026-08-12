@@ -164,9 +164,23 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
     ctx.ui.setFooter((tui, theme) => new ChrysakiFooter(active.store, theme, () => { active.renders++; tui.requestRender(); }));
     if (active.settings.editorEnabled) ctx.ui.setEditorComponent((tui, theme, keybindings) => new PracticalVimEditor(tui, theme, keybindings, active.settings.editorStartMode));
     let closeRail = () => {};
-    void ctx.ui.custom<void>((tui, theme, _keybindings, done) => { closeRail = done; return new RailComponent(active.store, theme, tui, done); }, {
+    let rail: RailComponent | undefined;
+    void ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+      rail = new RailComponent(active.store, theme, tui, done);
+      closeRail = done;
+      return rail;
+    }, {
       overlay: true,
-      overlayOptions: () => ({ anchor: "top-right", width: "28%", minWidth: 34, maxHeight: "100%", margin: 0, visible: (width) => railVisible(active.store.get().rail, width) }),
+      overlayOptions: () => ({
+        anchor: "right-center",
+        width: `${rail?.layout.width ?? 30}%`,
+        minWidth: 34,
+        maxHeight: `${rail?.layout.height ?? 72}%`,
+        margin: 1,
+        offsetX: rail?.layout.offsetX ?? 0,
+        offsetY: rail?.layout.offsetY ?? 0,
+        visible: (width) => railVisible(active.store.get().rail, width),
+      }),
       onHandle: (handle) => { active.sidebar.show(handle, closeRail); handle.unfocus(); },
     });
   });

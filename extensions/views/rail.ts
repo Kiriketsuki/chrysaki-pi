@@ -15,14 +15,35 @@ export function promoteModule(state: RailState, module: RailModule): RailState {
   return Object.freeze({ ...state, promoted: module, promotedCount: 1, modules: Object.freeze([module, ...state.modules.filter((item) => item !== module)]) });
 }
 
+export interface RailLayout {
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+}
+
 export class RailComponent {
   private cache = new Map<number, string[]>();
   private unsubscribe: () => void;
+  readonly layout: RailLayout = { offsetX: 0, offsetY: 0, width: 30, height: 72 };
   constructor(private store: StateStore<UiSnapshot>, private theme: Theme, private tui: TUI, private done: () => void) {
     this.unsubscribe = store.subscribe((state) => state, () => { this.invalidate(); this.tui.requestRender(); });
   }
   handleInput(data: string): void {
-    if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) this.done();
+    if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) { this.done(); return; }
+    const resize = matchesKey(data, "alt+shift+left") || matchesKey(data, "alt+shift+right") || matchesKey(data, "alt+shift+up") || matchesKey(data, "alt+shift+down");
+    if (resize) {
+      if (matchesKey(data, "alt+shift+left")) this.layout.width = Math.max(22, this.layout.width - 2);
+      if (matchesKey(data, "alt+shift+right")) this.layout.width = Math.min(60, this.layout.width + 2);
+      if (matchesKey(data, "alt+shift+up")) this.layout.height = Math.max(35, this.layout.height - 5);
+      if (matchesKey(data, "alt+shift+down")) this.layout.height = Math.min(95, this.layout.height + 5);
+    } else if (matchesKey(data, "alt+left") || matchesKey(data, "alt+right") || matchesKey(data, "alt+up") || matchesKey(data, "alt+down")) {
+      if (matchesKey(data, "alt+left")) this.layout.offsetX -= 2;
+      if (matchesKey(data, "alt+right")) this.layout.offsetX += 2;
+      if (matchesKey(data, "alt+up")) this.layout.offsetY -= 1;
+      if (matchesKey(data, "alt+down")) this.layout.offsetY += 1;
+    } else return;
+    this.invalidate(); this.tui.requestRender();
   }
   render(width: number): string[] {
     const cached = this.cache.get(width); if (cached) return cached;
