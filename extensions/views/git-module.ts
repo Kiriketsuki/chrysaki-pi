@@ -10,10 +10,11 @@ const statusColor = (theme: Theme, code: string, text: string): string => {
 };
 
 export function renderGitModule(snapshot: GitSnapshot, width: number, height = 20, theme?: Theme): string[] {
-  const color = theme ?? ({ fg: (_role: string, text: string) => text, bold: (text: string) => text } as Theme);
+  const color = theme ?? ({ fg: (_role: string, text: string) => text, bg: (_role: string, text: string) => text, bold: (text: string) => text } as Theme);
   if (!snapshot.available) {
     const bodyHeight = Math.max(1, height - 2);
-    return doubleBox([color.fg("muted", " Git unavailable"), ...Array.from({ length: bodyHeight - 1 }, () => "")], width, "GIT");
+    const panel = doubleBox([color.fg("muted", " Git unavailable"), ...Array.from({ length: bodyHeight - 1 }, () => "")], width, "GIT");
+    return typeof (color as any).bg === "function" ? panel.map((line) => (color as any).bg("toolPendingBg", line)) : panel;
   }
   const lines: string[] = [];
   const branch = snapshot.branch ?? "HEAD";
@@ -38,5 +39,8 @@ export function renderGitModule(snapshot: GitSnapshot, width: number, height = 2
   // A sidebar is a column, not a floating card: fill the requested viewport.
   const bodyHeight = Math.max(1, height - 2);
   while (lines.length < bodyHeight) lines.push("");
-  return doubleBox(lines.slice(0, bodyHeight), width, `GIT · ${branch}`);
+  // Overlays composite over the transcript. Paint every cell so the rail is
+  // an opaque panel rather than transparent text drawn on top of Pi.
+  const panel = doubleBox(lines.slice(0, bodyHeight), width, `GIT · ${branch}`);
+  return typeof (color as any).bg === "function" ? panel.map((line) => (color as any).bg("toolPendingBg", line)) : panel;
 }
