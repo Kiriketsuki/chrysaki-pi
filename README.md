@@ -1,11 +1,13 @@
 # chrysaki-pi
 
-Independent Pi theme integration for the Chrysaki ecosystem. The generated theme maps every required Pi role to the pinned [`chrysaki-core` v1.0.0](https://github.com/Kiriketsuki/chrysaki-core/releases/tag/v1.0.0) contract; application-specific role choices remain in this repository.
+A responsive Chrysaki Precision interface suite for [Pi](https://github.com/earendil-works/pi-mono). It combines the complete Chrysaki theme with cached telemetry, a width-aware context rail, mini Git visuals, a fuzzy command deck, and guided Practical Vim editing.
+
+![Chrysaki Pi interface](docs/chrysaki-pi-interface.png)
 
 ## Install
 
 ```bash
-pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.0.0
+pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.1.0
 ```
 
 Select `chrysaki` in `/settings` or set:
@@ -14,7 +16,59 @@ Select `chrysaki` in `/settings` or set:
 { "theme": "chrysaki" }
 ```
 
-The Git ref and core dependency are both pinned. A newer core release cannot change this theme until this repository deliberately updates its dependency and generated output.
+The package pins [`chrysaki-core` v1.0.0](https://github.com/Kiriketsuki/chrysaki-core/releases/tag/v1.0.0). Installation does not modify tmux or other dotfiles.
+
+## Interface
+
+- **Responsive footer:** one cached line in narrow tmux panes; model, thinking, context, branch, divergence, and change telemetry at wider widths.
+- **Context rail:** right-anchored overlay at 120 columns and above. Automatic promotion never overrides a manual pin or hide choice.
+- **Mini Git:** read-only branch, status, numstat, and bounded `● ┆ ╌` history. Git failures preserve the last snapshot and never disable core UI.
+- **Command deck:** press `Ctrl+Shift+P` or run `/chrysaki-deck`. Entries, availability, help, and handlers derive from one registry.
+- **Practical Vim:** starts in Insert mode. Escape enters Normal; `v` enters Visual. Unsupported printable sequences show a hint without changing the input.
+- **Minimal motion:** a static Chrysaki jewel is the default working indicator. The Deep Work preset uses a restrained pulse.
+
+## Commands
+
+| Command | Purpose |
+|:--|:--|
+| `/chrysaki-deck` | Open the fuzzy command deck |
+| `/chrysaki-rail [auto\|pin\|hide\|git\|context]` | Control or promote the rail |
+| `/chrysaki-preset [focused\|deep-work\|minimal]` | Apply thinking, tools, density, rail, and indicator policy |
+| `/chrysaki-settings` | Persist package settings after explicit user changes |
+| `/chrysaki-help` | Show registry-generated command help |
+| `/chrysaki-debug` | Benchmark cached footer rendering and show resource counts |
+
+Package prompts: `/chrysaki-review` and `/chrysaki-plan`.
+
+## Practical Vim subset
+
+- Modes: Insert, Normal, Visual
+- Motions: `h j k l`, `w b e`, `0 $`, `gg G`, numeric counts
+- Operators: `d c y`, doubled line operators (`dd`, `cc`, `yy`), `x`, `p`, `u`
+- Text objects: `iw`, `aw` (`ciw`, `daw`, and equivalents)
+- Search: `/query`, Enter, then `n`
+- Visual: `v`, extend with motions, apply `d`, `c`, or `y`
+
+Pi application and control shortcuts are delegated to `CustomEditor`; the Vim layer consumes only its supported printable commands and Escape mode transitions.
+
+## Settings
+
+Settings are stored in `~/.pi/agent/chrysaki-pi.json` only after a user changes them through `/chrysaki-settings`:
+
+- rail threshold (default `120`)
+- auto-promotion
+- minimal/off motion
+- Git module visibility
+- Practical Vim enabled/start mode
+- compact/comfortable density
+
+## Optional tmux forwarding
+
+See [`adapters/tmux/README.md`](adapters/tmux/README.md). The opt-in `Ctrl+Space, p` binding forwards the deck shortcut while preserving the existing `Ctrl+Space, Space` tmux palette. The adapter is never installed automatically.
+
+## Runtime safety
+
+Rendering reads immutable in-memory snapshots only. Filesystem access, JSON settings parsing, and Git processes run outside `render()`. Git output is capped, refreshes coalesce, failures back off, timeouts kill detached process groups, and shutdown/reload/session replacement disposes collectors, timers, subscriptions, overlays, and child processes idempotently.
 
 ## Remove or roll back
 
@@ -22,7 +76,7 @@ The Git ref and core dependency are both pinned. A newer core release cannot cha
 pi remove git:github.com/Kiriketsuki/chrysaki-pi
 ```
 
-To roll back, reinstall the previous package tag and reselect its theme. Installation and removal do not modify tmux or other dotfiles.
+To roll back, reinstall `@v1.0.0` for the theme-only release. Removal does not alter unrelated settings or dotfiles.
 
 ## Development
 
@@ -31,6 +85,4 @@ npm ci
 npm run check
 ```
 
-`themes/chrysaki.json` is generated and committed. Core palette changes belong in `chrysaki-core`; Pi role mappings belong here.
-
-The broader responsive interface suite is tracked separately under `docs/specs/` and is not part of the initial extraction contract.
+`themes/chrysaki.json` is generated and committed. Core palette changes belong in `chrysaki-core`; Pi-specific mappings and behavior belong here.

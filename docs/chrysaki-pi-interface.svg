@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820">
+  <rect width="1400" height="820" fill="#0f1117"/>
+  <rect x="36" y="34" width="1328" height="752" fill="#161821" stroke="#363a4f" stroke-width="2"/>
+  <text x="72" y="82" fill="#1a8a6a" font-family="monospace" font-size="26">══◆══</text>
+  <text x="72" y="122" fill="#e0e2ea" font-family="monospace" font-size="30" font-weight="bold">CHRYS AKI</text>
+  <text x="270" y="122" fill="#6a6e82" font-family="monospace" font-size="20">PRECISION INTERFACE · Pi</text>
+  <line x1="72" y1="145" x2="1324" y2="145" stroke="#1c3d7a" stroke-width="2"/>
+  <text x="82" y="205" fill="#a0a4b8" font-family="monospace" font-size="20">Implementing the interface suite with cached, non-blocking views.</text>
+  <rect x="76" y="245" width="850" height="356" fill="#1c1f2b" stroke="#363a4f"/>
+  <text x="104" y="288" fill="#fbb13c" font-family="monospace" font-size="18">◆ Runtime</text>
+  <text x="104" y="330" fill="#e0e2ea" font-family="monospace" font-size="19">Immutable snapshots · coalesced refreshes · bounded processes</text>
+  <text x="104" y="380" fill="#1a8a6a" font-family="monospace" font-size="18">✓ footer repaint stays cached</text>
+  <text x="104" y="420" fill="#1a8a6a" font-family="monospace" font-size="18">✓ Git collection runs asynchronously</text>
+  <text x="104" y="460" fill="#1a8a6a" font-family="monospace" font-size="18">✓ reload cleanup is idempotent</text>
+  <text x="104" y="530" fill="#6a6e82" font-family="monospace" font-size="18">Press Ctrl+Shift+P for the command deck</text>
+  <rect x="958" y="178" width="366" height="470" fill="#1c1f2b" stroke="#1a8a6a" stroke-width="3"/>
+  <text x="982" y="214" fill="#1a8a6a" font-family="monospace" font-size="20">╔ GIT · main ═══════════╗</text>
+  <text x="982" y="260" fill="#1a8a6a" font-family="monospace" font-size="18">● main  abc123  ↑2 ↓0</text>
+  <text x="982" y="304" fill="#fbb13c" font-family="monospace" font-size="17">M extensions/index.ts  +48 -2</text>
+  <text x="982" y="340" fill="#1a8a6a" font-family="monospace" font-size="17">A views/rail.ts         +92 -0</text>
+  <text x="982" y="398" fill="#6a6e82" font-family="monospace" font-size="17">╌╌ history ╌╌</text>
+  <text x="982" y="438" fill="#1a8a6a" font-family="monospace" font-size="17">● abc123 Interface suite</text>
+  <text x="982" y="474" fill="#a0a4b8" font-family="monospace" font-size="17">┆ def456 Theme foundation</text>
+  <text x="982" y="622" fill="#1a8a6a" font-family="monospace" font-size="20">╚═══════════════════════╝</text>
+  <line x1="72" y1="690" x2="1324" y2="690" stroke="#363a4f"/>
+  <text x="78" y="734" fill="#1a8a6a" font-family="monospace" font-size="19">⬢ CHRYSAKI</text>
+  <text x="246" y="734" fill="#e0e2ea" font-family="monospace" font-size="18">GPT-5 · high</text>
+  <text x="838" y="734" fill="#a0a4b8" font-family="monospace" font-size="18"> main ±12 · ctx 41% · ↑git</text>
+  <text x="78" y="772" fill="#fbb13c" font-family="monospace" font-size="17"> NORMAL </text>
+  <text x="202" y="772" fill="#6a6e82" font-family="monospace" font-size="17">i insert · v visual · ? help</text>
+</svg>

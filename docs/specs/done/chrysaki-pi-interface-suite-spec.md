@@ -20,10 +20,10 @@
 
 | # | Question | Raised By | Resolved |
 |:--|:---------|:----------|:---------|
-| 1 | What default terminal width should auto-open the context rail? | Responsive design | [ ] |
-| 2 | Which model/tool/thinking presets ship in the first release? | Workflow design | [ ] |
-| 3 | Which reserved key should the optional tmux adapter forward to Pi? | Integration | [ ] |
-| 4 | Should the package expose experimental animation controls in v1 or keep all motion minimal? | Visual design | [ ] |
+| 1 | What default terminal width should auto-open the context rail? | Responsive design | [x] 120 columns |
+| 2 | Which model/tool/thinking presets ship in the first release? | Workflow design | [x] Focused, Deep Work, and Minimal; preserve the current model while changing thinking/tools/UI policy |
+| 3 | Which reserved key should the optional tmux adapter forward to Pi? | Integration | [x] `Ctrl+Space, p` forwards Pi's `Ctrl+Shift+P` deck shortcut |
+| 4 | Should the package expose experimental animation controls in v1 or keep all motion minimal? | Visual design | [x] Minimal/off only; no experimental controls in v1 |
 
 ---
 
@@ -259,33 +259,33 @@ Feature: Chrysaki Pi Interface Suite
 
 | ID | Task | Priority | Dependencies | Status |
 |:---|:-----|:---------|:-------------|:-------|
-| T1 | Scaffold the standalone Pi package and pin chrysaki-core | High | Core release | pending |
-| T1.1 | Add package manifest, peer dependencies, resource discovery, and install smoke test | High | T1 | pending |
-| T2 | Map core tokens to a complete high-contrast Pi theme | High | T1 | pending |
-| T2.1 | Add theme schema validation, 256-color checks, and HTML export colors | High | T2 | pending |
-| T3 | Implement runtime coordinator, immutable state store, refresh scheduler, and disposal registry | High | T1 | pending |
-| T3.1 | Add deterministic clock/process abstractions for tests | High | T3 | pending |
-| T4 | Implement session/model/context collectors and cached responsive footer | High | T3 | pending |
-| T4.1 | Port existing Chrysaki telemetry behavior without synchronous render work | High | T4 | pending |
-| T5 | Implement asynchronous bounded Git collector and `GitSnapshot` | High | T3.1 | pending |
-| T5.1 | Add timeout, output-cap, backoff, cancellation, and process-group cleanup tests | High | T5 | pending |
-| T6 | Implement sidebar adapter over Pi's responsive overlay API | High | T3 | pending |
-| T6.1 | Add auto/pinned/hidden policy, width threshold, promotion ordering, and focus restoration | High | T6 | pending |
-| T6.2 | Implement context, task, files, and compact indicator modules | High | T6.1 | pending |
-| T7 | Implement mini Lazygit Git rail from `GitSnapshot` | High | T5, T6.2 | pending |
-| T7.1 | Add double-border, zero-radius, branch color, file/numstat, and bounded graph rendering | High | T7 | pending |
-| T8 | Define canonical command registry and palette categories | High | T3 | pending |
-| T8.1 | Implement fuzzy command deck overlay, filtering, navigation, execution, and focus tests | High | T8 | pending |
-| T8.2 | Generate key hints and help view from the same registry | High | T8.1 | pending |
-| T9 | Implement Practical Vim editor state machine starting in Insert mode | High | T3 | pending |
-| T9.1 | Add motions, counts, operators, undo/paste, search, and common text objects | High | T9 | pending |
-| T9.2 | Add Visual mode, selection rendering, unsupported-sequence hints, and application-key delegation tests | High | T9.1 | pending |
-| T10 | Implement Chrysaki header and working indicator treatment | Medium | T2, T3 | pending |
-| T11 | Add preset registry and initial workflow presets | Medium | T8 | pending |
-| T12 | Add interactive package settings and persistence | Medium | T6, T8, T9 | pending |
-| T13 | Add explicit opt-in tmux forwarding adapter and rollback documentation | Medium | T8 | pending |
-| T14 | Run responsive snapshots, TUI smoke tests, reload/lifecycle tests, and performance benchmarks | High | T2-T13 | pending |
-| T15 | Add README, screenshots, package metadata, version tag, and Git installation instructions | High | T14 | pending |
+| T1 | Scaffold the standalone Pi package and pin chrysaki-core | High | Core release | done |
+| T1.1 | Add package manifest, peer dependencies, resource discovery, and install smoke test | High | T1 | done |
+| T2 | Map core tokens to a complete high-contrast Pi theme | High | T1 | done |
+| T2.1 | Add theme schema validation, 256-color checks, and HTML export colors | High | T2 | done |
+| T3 | Implement runtime coordinator, immutable state store, refresh scheduler, and disposal registry | High | T1 | done |
+| T3.1 | Add deterministic clock/process abstractions for tests | High | T3 | done |
+| T4 | Implement session/model/context collectors and cached responsive footer | High | T3 | done |
+| T4.1 | Port existing Chrysaki telemetry behavior without synchronous render work | High | T4 | done |
+| T5 | Implement asynchronous bounded Git collector and `GitSnapshot` | High | T3.1 | done |
+| T5.1 | Add timeout, output-cap, backoff, cancellation, and process-group cleanup tests | High | T5 | done |
+| T6 | Implement sidebar adapter over Pi's responsive overlay API | High | T3 | done |
+| T6.1 | Add auto/pinned/hidden policy, width threshold, promotion ordering, and focus restoration | High | T6 | done |
+| T6.2 | Implement context, task, files, and compact indicator modules | High | T6.1 | done |
+| T7 | Implement mini Lazygit Git rail from `GitSnapshot` | High | T5, T6.2 | done |
+| T7.1 | Add double-border, zero-radius, branch color, file/numstat, and bounded graph rendering | High | T7 | done |
+| T8 | Define canonical command registry and palette categories | High | T3 | done |
+| T8.1 | Implement fuzzy command deck overlay, filtering, navigation, execution, and focus tests | High | T8 | done |
+| T8.2 | Generate key hints and help view from the same registry | High | T8.1 | done |
+| T9 | Implement Practical Vim editor state machine starting in Insert mode | High | T3 | done |
+| T9.1 | Add motions, counts, operators, undo/paste, search, and common text objects | High | T9 | done |
+| T9.2 | Add Visual mode, selection rendering, unsupported-sequence hints, and application-key delegation tests | High | T9.1 | done |
+| T10 | Implement Chrysaki header and working indicator treatment | Medium | T2, T3 | done |
+| T11 | Add preset registry and initial workflow presets | Medium | T8 | done |
+| T12 | Add interactive package settings and persistence | Medium | T6, T8, T9 | done |
+| T13 | Add explicit opt-in tmux forwarding adapter and rollback documentation | Medium | T8 | done |
+| T14 | Run responsive snapshots, TUI smoke tests, reload/lifecycle tests, and performance benchmarks | High | T2-T13 | done |
+| T15 | Add README, screenshots, package metadata, version tag, and Git installation instructions | High | T14 | done |
 
 ---
 
@@ -293,15 +293,15 @@ Feature: Chrysaki Pi Interface Suite
 
 - [ ] All Must-Have scenarios pass in CI.
 - [ ] No regressions occur in Pi's built-in editing, abort, model, thinking, tool expansion, session, or tree shortcuts.
-- [ ] Package, state, view, sidebar, and command contracts match implementation.
-- [ ] Every view line respects the width passed to `render()`.
-- [ ] No render path performs filesystem, network, Git, JSON parsing, or subprocess work.
-- [ ] Repeated TUI repaint profiling shows no periodic UI stalls attributable to Chrysaki Pi.
-- [ ] Reload and all session replacement paths leave no timer, subscription, overlay, or helper process behind.
-- [ ] Responsive visual snapshots pass for narrow tmux, standard terminal, and wide terminal sizes.
+- [x] Package, state, view, sidebar, and command contracts match implementation.
+- [x] Every view line respects the width passed to `render()`.
+- [x] No render path performs filesystem, network, Git, JSON parsing, or subprocess work.
+- [x] Repeated TUI repaint profiling shows no periodic UI stalls attributable to Chrysaki Pi.
+- [x] Reload and all session replacement paths leave no timer, subscription, overlay, or helper process behind.
+- [x] Responsive visual snapshots pass for narrow tmux, standard terminal, and wide terminal sizes.
 - [ ] The approved Chrysaki Precision visual review passes for theme, footer, rail, Git module, command deck, and editor modes.
 - [ ] Installation from a pinned Git tag succeeds in a clean Pi configuration and can be removed without altering unrelated user files.
-- [ ] Optional Git, GitHub, Codex, and tmux integrations fail closed without degrading core Pi operation.
+- [x] Optional Git, GitHub, Codex, and tmux integrations fail closed without degrading core Pi operation.
 
 ---
 
