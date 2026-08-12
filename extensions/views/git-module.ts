@@ -9,7 +9,7 @@ const statusColor = (theme: Theme, code: string, text: string): string => {
   return theme.fg("muted", text);
 };
 
-export function renderGitModule(snapshot: GitSnapshot, width: number, height = 20, theme?: Theme): string[] {
+export function renderGitModule(snapshot: GitSnapshot, width: number, height = 20, theme?: Theme, focused = false): string[] {
   const color = theme ?? ({ fg: (_role: string, text: string) => text, bg: (_role: string, text: string) => text, bold: (text: string) => text } as Theme);
   if (!snapshot.available) {
     const bodyHeight = Math.max(1, height - 2);
@@ -41,6 +41,7 @@ export function renderGitModule(snapshot: GitSnapshot, width: number, height = 2
   while (lines.length < bodyHeight) lines.push("");
   // Overlays composite over the transcript. Paint every cell so the rail is
   // an opaque panel rather than transparent text drawn on top of Pi.
-  const panel = doubleBox(lines.slice(0, bodyHeight), width, `GIT · ${branch}`);
+  let panel = doubleBox(lines.slice(0, bodyHeight), width, focused ? `◆ GIT · ${branch} · FOCUSED` : `GIT · ${branch}`);
+  if (focused) panel = panel.map((line) => color.fg("borderAccent", line));
   return typeof (color as any).bg === "function" ? panel.map((line) => (color as any).bg("toolPendingBg", line)) : panel;
 }

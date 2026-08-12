@@ -23,7 +23,8 @@ export interface RailLayout {
 }
 
 export class RailComponent {
-  private cache = new Map<number, string[]>();
+  focused = false;
+  private cache = new Map<string, string[]>();
   private unsubscribe: () => void;
   readonly layout: RailLayout = { offsetX: 0, offsetY: 0, width: 30, height: 72 };
   constructor(private store: StateStore<UiSnapshot>, private theme: Theme, private tui: TUI, private releaseFocus: () => void) {
@@ -46,11 +47,12 @@ export class RailComponent {
     this.invalidate(); this.tui.requestRender();
   }
   render(width: number): string[] {
-    const cached = this.cache.get(width); if (cached) return cached;
+    const cacheKey = `${width}:${this.focused}`;
+    const cached = this.cache.get(cacheKey); if (cached) return cached;
     const state = this.store.get();
     const module = state.rail.promoted ?? state.rail.modules[0] ?? "context";
     let lines: string[];
-    if (module === "git") lines = renderGitModule(state.git, width, this.tui.terminal.rows, this.theme);
+    if (module === "git") lines = renderGitModule(state.git, width, this.tui.terminal.rows, this.theme, this.focused);
     else if (module === "context") lines = doubleBox([
       ` ${this.theme.fg("accent", `${state.contextPercent.toFixed(0)}%`)} context`,
       ` ${formatCount(state.contextTokens)} / ${formatCount(state.contextWindow)} tokens`,
@@ -59,7 +61,7 @@ export class RailComponent {
     else if (module === "files") lines = doubleBox(state.git.files.slice(0, 12).map((file) => ` ${file.worktreeStatus.trim() || file.indexStatus.trim()} ${fit(file.path, width - 6)}`), width, "FILES");
     else if (module === "activity") lines = doubleBox(state.activeProcesses.length ? state.activeProcesses.map((name) => ` ● ${name}`) : [" idle"], width, "ACTIVITY");
     else lines = doubleBox([" No active plan tasks", this.theme.fg("dim", " Use the command deck for actions")], width, "TASKS");
-    this.cache.set(width, lines); return lines;
+    this.cache.set(cacheKey, lines); return lines;
   }
   invalidate(): void { this.cache.clear(); }
   dispose(): void { this.unsubscribe(); this.cache.clear(); }

@@ -1,8 +1,8 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import type { StateStore } from "../runtime/store.ts";
 import type { RateLimitWindow, UiSnapshot } from "../runtime/types.ts";
 import { columns, fit, formatCount } from "./layout.ts";
-import { visibleWidth } from "@earendil-works/pi-tui";
 
 export type FooterMode = "compact" | "rich";
 export function footerMode(width: number): FooterMode { return width < 100 ? "compact" : "rich"; }
@@ -29,12 +29,19 @@ function repositoryStats(state: UiSnapshot): { added: number; deleted: number } 
   return state.git.files.reduce((total, file) => ({ added: total.added + file.added, deleted: total.deleted + file.deleted }), { added: 0, deleted: 0 });
 }
 
-function deckColumns(theme: Theme, left: string, right: string, width: number): string {
-  const gutter = width >= 120 ? 3 : 2;
-  const innerWidth = Math.max(1, width - gutter * 2);
-  const gap = Math.max(1, innerWidth - visibleWidth(left) - visibleWidth(right) - 2);
-  const rule = theme.fg("borderMuted", "─".repeat(gap));
-  return fit(`${" ".repeat(gutter)}${left} ${rule} ${right}${" ".repeat(gutter)}`, width);
+function deckGrid(theme: Theme, cells: readonly string[], width: number): string {
+  const gutter = 2;
+  const separators = cells.length - 1;
+  const innerWidth = Math.max(cells.length, width - gutter * 2 - separators * 3);
+  const base = Math.floor(innerWidth / cells.length);
+  const remainder = innerWidth - base * cells.length;
+  const rendered = cells.map((cell, index) => {
+    // Give spare columns to the left first: equal stops with a subtle left bias.
+    const cellWidth = base + (index < remainder ? 1 : 0);
+    const fitted = fit(cell, cellWidth);
+    return fitted + " ".repeat(Math.max(0, cellWidth - visibleWidth(fitted)));
+  });
+  return fit(`${" ".repeat(gutter)}${rendered.join(theme.fg("borderMuted", " ─ "))}${" ".repeat(gutter)}`, width);
 }
 
 export class ChrysakiFooter {
@@ -68,11 +75,31 @@ export class ChrysakiFooter {
       const contextRole = state.contextPercent >= 85 ? "error" : state.contextPercent >= 60 ? "warning" : "success";
       const context = `${bar(state.contextPercent)} ${state.contextPercent.toFixed(0)}% (${formatCount(state.contextTokens)}/${formatCount(state.contextWindow)})`;
       result = [
-        deckColumns(this.theme, `${this.theme.fg("accent", "◆ CHRYSAKI")}  ${this.theme.bold(state.model)}  ${this.theme.fg("muted", state.thinkingLevel)}`, `${this.theme.fg("accent", cwd)}  ${this.theme.fg("muted", `${state.provider} · pi`)}`, width),
-        deckColumns(this.theme, rate(this.theme, "▰ 5h", state.rateLimits.fiveHour), `${rate(this.theme, "▱ 7d", state.rateLimits.sevenDay)}  ${this.theme.fg("warning", `$${state.usage.costUsd.toFixed(3)}`)}`, width),
-        deckColumns(this.theme, this.theme.fg(contextRole, `▰ ctx  ${context}`), `${this.theme.fg("muted", `↓ ${formatCount(state.usage.input)}  ↑ ${formatCount(state.usage.output)}  ⧈ ${formatCount(state.usage.cacheRead + state.usage.cacheWrite)}`)}`, width),
-        deckColumns(this.theme, this.theme.fg("muted", `⎇ ${branch}${state.git.ahead ? ` ↑${state.git.ahead}` : ""}${state.git.behind ? ` ↓${state.git.behind}` : ""}  ⊙ ${state.git.commit ?? "—"}`), `${this.theme.fg("success", `+${repo.added}`)} ${this.theme.fg("error", `-${repo.deleted}`)}  ◆ ${changes} files${promoted}`, width),
-      ].map((line) => fit(line, width));
+        deckGrid(this.theme, [
+          this.theme.fg("accent", "◆ CHRYSAKI"),
+          `${this.theme.bold(state.model)}  ${this.theme.fg("muted", state.thinkingLevel)}`,
+          this.theme.fg("accent", cwd),
+          this.theme.fg("muted", `${state.provider} · pi`),
+        ], width),
+        deckGrid(this.theme, [
+          rate(this.theme, "▰ 5h", state.rateLimits.fiveHour),
+          rate(this.theme, "▱ 7d", state.rateLimits.sevenDay),
+          this.theme.fg("warning", `$ ${state.usage.costUsd.toFixed(3)}`),
+          "",
+        ], width),
+        deckGrid(this.theme, [
+          this.theme.fg(contextRole, `▰ ctx  ${context}`),
+          this.theme.fg("muted", `↓ input   ${formatCount(state.usage.input)}`),
+          this.theme.fg("muted", `↑ output  ${formatCount(state.usage.output)}`),
+          this.theme.fg("muted", `⧈ cache   ${formatCount(state.usage.cacheRead + state.usage.cacheWrite)}`),
+        ], width),
+        deckGrid(this.theme, [
+          this.theme.fg("muted", `⎇ ${branch}${state.git.ahead ? ` ↑${state.git.ahead}` : ""}${state.git.behind ? ` ↓${state.git.behind}` : ""}`),
+          this.theme.fg("muted", `⊙ ${state.git.commit ?? "—"}`),
+          `${this.theme.fg("success", `+${repo.added}`)}  ${this.theme.fg("error", `-${repo.deleted}`)}`,
+          `◆ ${changes} files${promoted}`,
+        ], width),
+      ];
     }
     this.cache.set(width, result);
     return result;
