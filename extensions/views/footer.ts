@@ -35,12 +35,15 @@ function deckGrid(theme: Theme, cells: readonly string[], width: number): string
   const base = Math.floor(innerWidth / cells.length);
   const remainder = innerWidth - base * cells.length;
   const rendered = cells.map((cell, index) => {
-    // Equal tab stops, with spare columns assigned from the left. Fill every
-    // unused cell with a rule so the deck reads as one connected instrument.
+    // Equal tab stops with spare columns assigned from the left. A short lead
+    // rule and one space on each side frame the value without breaking the
+    // continuous instrument line.
     const cellWidth = base + (index < remainder ? 1 : 0);
-    const fitted = fit(cell, Math.max(1, cellWidth - 2));
-    const ruleWidth = Math.max(0, cellWidth - visibleWidth(fitted) - 1);
-    return `${fitted} ${theme.fg("borderMuted", "─".repeat(ruleWidth))}`;
+    if (!cell) return theme.fg("borderMuted", "─".repeat(cellWidth));
+    const leadWidth = Math.min(2, Math.max(0, cellWidth - 3));
+    const fitted = fit(cell, Math.max(1, cellWidth - leadWidth - 2));
+    const tailWidth = Math.max(0, cellWidth - leadWidth - visibleWidth(fitted) - 2);
+    return `${theme.fg("borderMuted", "─".repeat(leadWidth))} ${fitted} ${theme.fg("borderMuted", "─".repeat(tailWidth))}`;
   });
   return fit(`${" ".repeat(gutter)}${rendered.join("")}${" ".repeat(gutter)}`, width);
 }
