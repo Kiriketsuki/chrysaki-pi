@@ -67,6 +67,7 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
     { id: "view.rail-hide", label: "Rail: Hide", category: "View", description: "Hide the context rail", handler: ({ runtime }) => setRailVisibility(runtime, "hidden") },
     { id: "git.promote", label: "Show Git Context", category: "Git", description: "Promote the read-only mini Lazygit module", available: ({ runtime }) => runtime.store.get().git.available, handler: ({ runtime }) => promote(runtime, "git") },
     { id: "git.refresh", label: "Refresh Git", category: "Git", description: "Request a bounded asynchronous Git refresh", handler: ({ runtime }) => runtime.scheduler.request("command:git") },
+    { id: "git.focus", label: "Focus Git Panel", category: "Git", description: "Focus the floating panel for Alt+Arrow move and resize controls", keyHint: "Ctrl+Shift+G", handler: ({ runtime }) => runtime.sidebar.focus() },
     { id: "model.cycle-thinking", label: "Cycle Thinking", category: "Model", description: "Cycle the active model's thinking level", keyHint: "Shift+Tab", handler: ({ ctx }) => ctx.ui.notify("Use Shift+Tab to cycle thinking without overriding Pi defaults", "info") },
     { id: "session.context", label: "Show Session Context", category: "Session", description: "Promote model, context, and session telemetry", handler: ({ runtime }) => promote(runtime, "context") },
     ...PRESETS.map((preset): CommandDefinition<CommandContext> => ({ id: `preset.${preset.id}`, label: preset.label, category: "Preset", description: `${preset.thinkingLevel} thinking · ${preset.density} UI · ${preset.railPolicy} rail`, handler: ({ ctx, runtime }) => applyPreset(preset.id, ctx, runtime) })),
@@ -136,6 +137,7 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
   pi.registerCommand("chrysaki-preset", { description: "Apply focused, deep-work, or minimal preset", getArgumentCompletions: (prefix) => PRESETS.filter((preset) => preset.id.startsWith(prefix)).map((preset) => ({ value: preset.id, label: preset.label })), handler: async (args, ctx) => { if (runtime) await applyPreset(args.trim() || "focused", ctx, runtime); } });
   pi.registerCommand("chrysaki-debug", { description: "Show cached-render and collector diagnostics", handler: async (_args, ctx) => { if (!runtime) return; const before = performance.now(); const footer = new ChrysakiFooter(runtime.store, ctx.ui.theme, () => {}); for (let index = 0; index < 10_000; index++) footer.render(index % 2 ? 80 : 160); const elapsed = performance.now() - before; footer.dispose(); ctx.ui.notify(`10k cached footer renders: ${elapsed.toFixed(1)}ms · children ${runtime.processes.activeCount} · subscriptions ${runtime.store.subscriptionCount}`, "info"); } });
   pi.registerShortcut("ctrl+shift+p", { description: "Open Chrysaki command deck", handler: async (ctx) => { if (runtime) await openDeck(ctx, runtime); } });
+  pi.registerShortcut("ctrl+shift+g", { description: "Focus the Chrysaki Git panel", handler: async () => { runtime?.sidebar.focus(); } });
 
   pi.on("session_start", async (_event, ctx) => {
     const disposal = new DisposalRegistry();
@@ -166,7 +168,7 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
     let closeRail = () => {};
     let rail: RailComponent | undefined;
     void ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-      rail = new RailComponent(active.store, theme, tui, done);
+      rail = new RailComponent(active.store, theme, tui, () => active.sidebar.unfocus());
       closeRail = done;
       return rail;
     }, {
