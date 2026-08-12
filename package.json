@@ -1,0 +1,24 @@
+{
+  "name": "@kiriketsuki/chrysaki-pi",
+  "version": "1.0.0",
+  "description": "Chrysaki theme integration for Pi",
+  "type": "module",
+  "license": "MIT",
+  "repository": "github:Kiriketsuki/chrysaki-pi",
+  "keywords": ["pi-package", "pi-theme", "chrysaki"],
+  "dependencies": {
+    "@kiriketsuki/chrysaki-core": "github:Kiriketsuki/chrysaki-core#v1.0.0"
+  },
+  "pi": {
+    "themes": ["./themes"]
+  },
+  "files": ["themes", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "node scripts/build-theme.mjs",
+    "test": "node --test",
+    "check": "npm run build && npm test && git diff --exit-code -- themes"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
