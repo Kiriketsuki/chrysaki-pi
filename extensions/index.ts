@@ -166,7 +166,7 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
     let closeRail = () => {};
     void ctx.ui.custom<void>((tui, theme, _keybindings, done) => { closeRail = done; return new RailComponent(active.store, theme, tui, done); }, {
       overlay: true,
-      overlayOptions: () => ({ anchor: "right-center", width: "28%", minWidth: 34, maxHeight: "90%", margin: { right: 1 }, visible: (width) => railVisible(active.store.get().rail, width) }),
+      overlayOptions: () => ({ anchor: "top-right", width: "28%", minWidth: 34, maxHeight: "100%", margin: 0, visible: (width) => railVisible(active.store.get().rail, width) }),
       onHandle: (handle) => { active.sidebar.show(handle, closeRail); handle.unfocus(); },
     });
   });

@@ -1,7 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { Input, matchesKey, truncateToWidth, type TUI } from "@earendil-works/pi-tui";
+import { Input, matchesKey, type TUI } from "@earendil-works/pi-tui";
 import { filterCommands, type CommandDefinition } from "../commands/registry.ts";
-import { doubleBox } from "./layout.ts";
+import { columns, fit } from "./layout.ts";
 
 export class CommandDeck<Context> {
   focused = false;
@@ -30,20 +30,25 @@ export class CommandDeck<Context> {
   }
   render(width: number): string[] {
     this.input.focused = this.focused;
-    const [query = ""] = this.input.render(Math.max(1, width - 8));
-    const lines = [` ${this.theme.fg("warning", "❯")} ${query}`, this.theme.fg("borderMuted", " ╌".repeat(Math.max(1, Math.floor((width - 4) / 2))))];
-    if (!this.filtered.length) lines.push(this.theme.fg("muted", " No matching commands"));
+    const [query = ""] = this.input.render(Math.max(1, width - 4));
+    const lines = [
+      `${this.theme.fg("warning", "❯")} ${query}`,
+      this.theme.fg("borderMuted", "─".repeat(Math.max(1, width))),
+    ];
+    if (!this.filtered.length) lines.push(this.theme.fg("muted", "  No matching commands"));
     const start = Math.max(0, Math.min(this.selected - 6, Math.max(0, this.filtered.length - 12)));
+    const categoryWidth = Math.max(7, ...this.filtered.slice(start, start + 12).map((command) => command.category.length));
     for (const [offset, command] of this.filtered.slice(start, start + 12).entries()) {
       const selected = start + offset === this.selected;
       const marker = selected ? this.theme.fg("warning", "▸") : " ";
-      const category = this.theme.fg(selected ? "accent" : "muted", command.category.padEnd(7));
+      const category = this.theme.fg(selected ? "accent" : "muted", command.category.padEnd(categoryWidth));
       const label = selected ? this.theme.bold(command.label) : command.label;
-      lines.push(truncateToWidth(` ${marker} ${category} ${label}${command.keyHint ? this.theme.fg("dim", `  ${command.keyHint}`) : ""}`, width - 2));
-      if (selected) lines.push(truncateToWidth(`     ${this.theme.fg("muted", command.description)}`, width - 2));
+      const hint = command.keyHint ? this.theme.fg("dim", command.keyHint) : "";
+      lines.push(fit(` ${marker} ${category}  ${columns(label, hint, Math.max(1, width - categoryWidth - 5))}`, width));
+      if (selected) lines.push(fit(`       ${this.theme.fg("muted", command.description)}`, width));
     }
     lines.push(this.theme.fg("dim", " ↑↓ navigate · enter execute · esc cancel"));
-    return doubleBox(lines, width, "COMMAND DECK");
+    return lines;
   }
   invalidate(): void { this.input.invalidate(); }
 }

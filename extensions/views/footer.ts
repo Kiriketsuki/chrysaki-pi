@@ -28,6 +28,12 @@ function repositoryStats(state: UiSnapshot): { added: number; deleted: number } 
   return state.git.files.reduce((total, file) => ({ added: total.added + file.added, deleted: total.deleted + file.deleted }), { added: 0, deleted: 0 });
 }
 
+function deckColumns(left: string, right: string, width: number): string {
+  const gutter = width >= 120 ? 3 : 2;
+  const innerWidth = Math.max(1, width - gutter * 2);
+  return `${" ".repeat(gutter)}${columns(left, right, innerWidth)}${" ".repeat(gutter)}`;
+}
+
 export class ChrysakiFooter {
   private cache = new Map<number, string[]>();
   private unsubscribe: () => void;
@@ -59,10 +65,10 @@ export class ChrysakiFooter {
       const contextRole = state.contextPercent >= 85 ? "error" : state.contextPercent >= 60 ? "warning" : "success";
       const context = `${bar(state.contextPercent)} ${state.contextPercent.toFixed(0)}% (${formatCount(state.contextTokens)}/${formatCount(state.contextWindow)})`;
       result = [
-        columns(`${this.theme.fg("accent", "━━  ⬢")} ${this.theme.bold(state.model)} ${this.theme.fg("borderMuted", "━━━━━━━━")}`, `${this.theme.fg("accent", cwd)}  ${this.theme.fg("muted", `${state.provider} · ${state.thinkingLevel}`)}`, width),
-        columns(rate(this.theme, "▰ 5h", state.rateLimits.fiveHour), `${rate(this.theme, "▱ 7d", state.rateLimits.sevenDay)}  ${this.theme.fg("warning", `$${state.usage.costUsd.toFixed(3)}`)}`, width),
-        columns(this.theme.fg(contextRole, `▰ ctx ${context}`), `${this.theme.fg("muted", `↓ ${formatCount(state.usage.input)}  ↑ ${formatCount(state.usage.output)}  cache ⧈ ${formatCount(state.usage.cacheRead + state.usage.cacheWrite)}`)}`, width),
-        columns(this.theme.fg("muted", `⎇ ${branch}${state.git.ahead ? ` ↑${state.git.ahead}` : ""}${state.git.behind ? ` ↓${state.git.behind}` : ""}  ⊙ ${state.git.commit ?? "—"}`), `${this.theme.fg("success", `+${repo.added}`)} ${this.theme.fg("error", `-${repo.deleted}`)}  ${changes} files${promoted}`, width),
+        deckColumns(`${this.theme.fg("accent", "⬢ CHRYSAKI")}  ${this.theme.bold(state.model)}  ${this.theme.fg("muted", state.thinkingLevel)}`, `${this.theme.fg("accent", cwd)}  ${this.theme.fg("muted", state.provider)}`, width),
+        deckColumns(rate(this.theme, "5h", state.rateLimits.fiveHour), `${rate(this.theme, "7d", state.rateLimits.sevenDay)}  ${this.theme.fg("warning", `$${state.usage.costUsd.toFixed(3)}`)}`, width),
+        deckColumns(this.theme.fg(contextRole, `ctx  ${context}`), `${this.theme.fg("muted", `in ${formatCount(state.usage.input)}  out ${formatCount(state.usage.output)}  cache ${formatCount(state.usage.cacheRead + state.usage.cacheWrite)}`)}`, width),
+        deckColumns(this.theme.fg("muted", `git  ${branch}${state.git.ahead ? ` ↑${state.git.ahead}` : ""}${state.git.behind ? ` ↓${state.git.behind}` : ""}  ${state.git.commit ?? "—"}`), `${this.theme.fg("success", `+${repo.added}`)} ${this.theme.fg("error", `-${repo.deleted}`)}  ${changes} files${promoted}`, width),
       ].map((line) => fit(line, width));
     }
     this.cache.set(width, result);

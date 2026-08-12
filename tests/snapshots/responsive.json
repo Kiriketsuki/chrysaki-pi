@@ -7,9 +7,9 @@
     "↓13k ↑3.2k cache 8.5k                                                                  main ±1 ↑git"
   ],
   "wide": [
-    "━━  ⬢ GPT-5 ━━━━━━━━                                                                                                      workspace/project  openai-codex · high",
-    "▰ 5h ◆◆◇◇◇◇◇◇ 31%                                                                                                                      ▱ 7d ◆◆◆◆◇◇◇◇ 48%  $0.123",
-    "▰ ctx ◆◆◆◇◇◇◇◇ 41% (41k/100k)                                                                                                        ↓ 13k  ↑ 3.2k  cache ⧈ 8.5k",
-    "⎇ main ↑1  ⊙ abc                                                                                                                             +1 -0  1 files ↑git"
+    "   ⬢ CHRYSAKI  GPT-5  high                                                                                                    workspace/project  openai-codex   ",
+    "   5h ◆◆◇◇◇◇◇◇ 31%                                                                                                                    7d ◆◆◆◆◇◇◇◇ 48%  $0.123   ",
+    "   ctx  ◆◆◆◇◇◇◇◇ 41% (41k/100k)                                                                                                  in 13k  out 3.2k  cache 8.5k   ",
+    "   git  main ↑1  abc                                                                                                                      +1 -0  1 files ↑git   "
   ]
 }

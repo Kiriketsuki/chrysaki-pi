@@ -29,7 +29,7 @@ export class RailComponent {
     const state = this.store.get();
     const module = state.rail.promoted ?? state.rail.modules[0] ?? "context";
     let lines: string[];
-    if (module === "git") lines = renderGitModule(state.git, width, this.tui.terminal.rows - 4, this.theme);
+    if (module === "git") lines = renderGitModule(state.git, width, this.tui.terminal.rows, this.theme);
     else if (module === "context") lines = doubleBox([
       ` ${this.theme.fg("accent", `${state.contextPercent.toFixed(0)}%`)} context`,
       ` ${formatCount(state.contextTokens)} / ${formatCount(state.contextWindow)} tokens`,

@@ -11,7 +11,10 @@ const statusColor = (theme: Theme, code: string, text: string): string => {
 
 export function renderGitModule(snapshot: GitSnapshot, width: number, height = 20, theme?: Theme): string[] {
   const color = theme ?? ({ fg: (_role: string, text: string) => text, bold: (text: string) => text } as Theme);
-  if (!snapshot.available) return doubleBox([color.fg("muted", " Git unavailable")], width, "GIT");
+  if (!snapshot.available) {
+    const bodyHeight = Math.max(1, height - 2);
+    return doubleBox([color.fg("muted", " Git unavailable"), ...Array.from({ length: bodyHeight - 1 }, () => "")], width, "GIT");
+  }
   const lines: string[] = [];
   const branch = snapshot.branch ?? "HEAD";
   lines.push(` ${color.fg("accent", "●")} ${color.bold(branch)} ${color.fg("muted", snapshot.commit ?? "")}`);
@@ -24,11 +27,16 @@ export function renderGitModule(snapshot: GitSnapshot, width: number, height = 2
   }
   if (snapshot.files.length > roomForFiles) lines.push(color.fg("dim", `   … ${snapshot.files.length - roomForFiles} more`));
   if (height >= 14 && snapshot.graph.length) {
-    lines.push(color.fg("borderMuted", " ╌╌ history ╌╌"));
-    snapshot.graph.slice(0, Math.max(1, height - lines.length - 3)).forEach((commit, index) => {
+    lines.push(color.fg("borderMuted", " ── history ─────────────────────────"));
+    const historyRows = Math.max(1, height - lines.length - 3);
+    snapshot.graph.slice(0, historyRows).forEach((commit, index) => {
       const graph = index === 0 ? "●" : "┆";
-      lines.push(` ${color.fg(index === 0 ? "accent" : "muted", graph)} ${color.fg("muted", commit.hash)} ${fit(commit.subject, Math.max(4, width - 13))}`);
+      const hash = color.fg("muted", commit.hash.padEnd(8));
+      lines.push(` ${color.fg(index === 0 ? "accent" : "muted", graph)} ${hash} ${fit(commit.subject, Math.max(4, width - 15))}`);
     });
   }
-  return doubleBox(lines, width, `GIT · ${branch}`);
+  // A sidebar is a column, not a floating card: fill the requested viewport.
+  const bodyHeight = Math.max(1, height - 2);
+  while (lines.length < bodyHeight) lines.push("");
+  return doubleBox(lines.slice(0, bodyHeight), width, `GIT · ${branch}`);
 }
