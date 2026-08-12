@@ -13,9 +13,14 @@ const required = [
   "syntaxPunctuation", "thinkingOff", "thinkingMinimal", "thinkingLow", "thinkingMedium", "thinkingHigh", "thinkingXhigh", "bashMode"
 ];
 
-test("Pi manifest discovers the generated theme", () => {
+test("Pi manifest discovers the complete interface package", () => {
   assert.deepEqual(packageJson.pi.themes, ["./themes"]);
+  assert.deepEqual(packageJson.pi.extensions, ["./extensions/index.ts"]);
+  assert.deepEqual(packageJson.pi.prompts, ["./prompts"]);
   assert.match(packageJson.dependencies["@kiriketsuki/chrysaki-core"], /#v1\.0\.0$/);
+  for (const dependency of ["@earendil-works/pi-ai", "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui", "typebox"]) {
+    assert.equal(packageJson.peerDependencies[dependency], "*");
+  }
   assert.equal(theme.name, "chrysaki");
 });
 

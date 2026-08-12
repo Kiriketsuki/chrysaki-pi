@@ -1,22 +1,60 @@
 {
   "name": "@kiriketsuki/chrysaki-pi",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Chrysaki theme integration for Pi",
   "type": "module",
   "license": "MIT",
   "repository": "github:Kiriketsuki/chrysaki-pi",
-  "keywords": ["pi-package", "pi-theme", "chrysaki"],
+  "keywords": [
+    "pi-package",
+    "pi-theme",
+    "pi-extension",
+    "chrysaki"
+  ],
   "dependencies": {
     "@kiriketsuki/chrysaki-core": "github:Kiriketsuki/chrysaki-core#v1.0.0"
   },
-  "pi": {
-    "themes": ["./themes"]
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   },
-  "files": ["themes", "README.md", "LICENSE"],
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-tui": "^0.84.1",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typebox": "^1.3.7",
+    "typescript": "^5.9.0"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "themes": [
+      "./themes"
+    ],
+    "prompts": [
+      "./prompts"
+    ],
+    "image": "https://raw.githubusercontent.com/Kiriketsuki/chrysaki-pi/v1.1.0/docs/chrysaki-pi-interface.png"
+  },
+  "files": [
+    "extensions",
+    "themes",
+    "prompts",
+    "adapters",
+    "docs/chrysaki-pi-interface.png",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "node scripts/build-theme.mjs",
-    "test": "node --test",
-    "check": "npm run build && npm test && git diff --exit-code -- themes"
+    "test": "tsx --test tests/**/*.test.{mjs,ts}",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run build && npm run typecheck && npm test && git diff --exit-code -- themes"
   },
   "engines": {
     "node": ">=20"
