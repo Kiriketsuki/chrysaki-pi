@@ -31,17 +31,18 @@ function repositoryStats(state: UiSnapshot): { added: number; deleted: number } 
 
 function deckGrid(theme: Theme, cells: readonly string[], width: number): string {
   const gutter = 2;
-  const separators = cells.length - 1;
-  const innerWidth = Math.max(cells.length, width - gutter * 2 - separators * 3);
+  const innerWidth = Math.max(cells.length, width - gutter * 2);
   const base = Math.floor(innerWidth / cells.length);
   const remainder = innerWidth - base * cells.length;
   const rendered = cells.map((cell, index) => {
-    // Give spare columns to the left first: equal stops with a subtle left bias.
+    // Equal tab stops, with spare columns assigned from the left. Fill every
+    // unused cell with a rule so the deck reads as one connected instrument.
     const cellWidth = base + (index < remainder ? 1 : 0);
-    const fitted = fit(cell, cellWidth);
-    return fitted + " ".repeat(Math.max(0, cellWidth - visibleWidth(fitted)));
+    const fitted = fit(cell, Math.max(1, cellWidth - 2));
+    const ruleWidth = Math.max(0, cellWidth - visibleWidth(fitted) - 1);
+    return `${fitted} ${theme.fg("borderMuted", "─".repeat(ruleWidth))}`;
   });
-  return fit(`${" ".repeat(gutter)}${rendered.join(theme.fg("borderMuted", " ─ "))}${" ".repeat(gutter)}`, width);
+  return fit(`${" ".repeat(gutter)}${rendered.join("")}${" ".repeat(gutter)}`, width);
 }
 
 export class ChrysakiFooter {
