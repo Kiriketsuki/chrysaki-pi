@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PracticalVimEditor } from "../../extensions/editor/practical-vim.ts";
 import { VimEngine, type VimResult } from "../../extensions/editor/vim-core.ts";
 
 function run(engine: VimEngine, keys: string[], text: string, cursor = 0): VimResult {
@@ -45,6 +46,16 @@ test("search, next match, and unsupported sequences are safe", () => {
   const next = run(engine, ["n"], found.text, found.cursor); assert.equal(next.cursor, 11);
   const unsupported = run(engine, ["q"], next.text, next.cursor);
   assert.equal(unsupported.text, next.text); assert.match(unsupported.hint, /Unsupported/);
+});
+
+test("Normal-mode Escape delegates Pi's application interrupt", () => {
+  const tui: any = { terminal: { rows: 30 }, requestRender() {} };
+  const theme: any = { borderColor: (text: string) => text, selectList: {} };
+  const keybindings: any = { matches: (data: string, action: string) => action === "app.interrupt" && data === "\x1b" };
+  const editor = new PracticalVimEditor(tui, theme, keybindings, "normal");
+  let interrupted = 0; editor.onEscape = () => { interrupted++; };
+  editor.handleInput("\x1b");
+  assert.equal(interrupted, 1); assert.equal(editor.vim.mode, "normal");
 });
 
 test("control sequences are not claimed by the Vim engine adapter contract", () => {

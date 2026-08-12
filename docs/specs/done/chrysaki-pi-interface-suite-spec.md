@@ -291,7 +291,7 @@ Feature: Chrysaki Pi Interface Suite
 
 ## Exit Criteria
 
-- [ ] All Must-Have scenarios pass in CI.
+- [x] All Must-Have scenarios pass in CI.
 - [ ] No regressions occur in Pi's built-in editing, abort, model, thinking, tool expansion, session, or tree shortcuts.
 - [x] Package, state, view, sidebar, and command contracts match implementation.
 - [x] Every view line respects the width passed to `render()`.
@@ -300,7 +300,7 @@ Feature: Chrysaki Pi Interface Suite
 - [x] Reload and all session replacement paths leave no timer, subscription, overlay, or helper process behind.
 - [x] Responsive visual snapshots pass for narrow tmux, standard terminal, and wide terminal sizes.
 - [ ] The approved Chrysaki Precision visual review passes for theme, footer, rail, Git module, command deck, and editor modes.
-- [ ] Installation from a pinned Git tag succeeds in a clean Pi configuration and can be removed without altering unrelated user files.
+- [x] Installation from a pinned Git tag succeeds in a clean Pi configuration and can be removed without altering unrelated user files.
 - [x] Optional Git, GitHub, Codex, and tmux integrations fail closed without degrading core Pi operation.
 
 ---

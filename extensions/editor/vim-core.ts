@@ -58,6 +58,8 @@ export class VimEngine {
 
   constructor(startMode: "insert" | "normal" = "insert") { this.mode = startMode; this.hint = startMode === "insert" ? "INSERT · Esc for Normal" : "NORMAL · i insert · v visual · ? help"; }
 
+  get isSearching(): boolean { return this.searchInput; }
+
   handle(key: string, text: string, cursor: number): VimResult {
     const result = (handled = true): VimResult => ({ handled, text, cursor: clamp(cursor, 0, text.length), mode: this.mode, hint: this.hint, selection: this.selection(cursor) });
     if (this.mode === "insert") {

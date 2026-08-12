@@ -29,6 +29,8 @@ export class PracticalVimEditor extends CustomEditor {
   handleInput(data: string): void {
     const key = keyName(data);
     if (!key) { super.handleInput(data); return; }
+    if (key === "escape" && this.vim.mode === "normal") { super.handleInput(data); return; }
+    if (key === "enter" && this.vim.mode === "normal" && !this.vim.isSearching) { super.handleInput(data); return; }
     const text = this.getText();
     const beforeCursor = cursorOffset(text, this.getCursor());
     const result = this.vim.handle(key, text, beforeCursor);

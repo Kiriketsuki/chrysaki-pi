@@ -17,6 +17,8 @@ test("Pi manifest discovers the complete interface package", () => {
   assert.deepEqual(packageJson.pi.themes, ["./themes"]);
   assert.deepEqual(packageJson.pi.extensions, ["./extensions/index.ts"]);
   assert.deepEqual(packageJson.pi.prompts, ["./prompts"]);
+  assert.equal(packageJson.version, "1.1.1");
+  assert.match(packageJson.pi.image, /\/v1\.1\.1\/docs\/chrysaki-pi-interface\.png$/);
   assert.match(packageJson.dependencies["@kiriketsuki/chrysaki-core"], /#v1\.0\.0$/);
   for (const dependency of ["@earendil-works/pi-ai", "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui", "typebox"]) {
     assert.equal(packageJson.peerDependencies[dependency], "*");
