@@ -7,7 +7,7 @@ A responsive Chrysaki Precision interface suite for [Pi](https://github.com/eare
 ## Install
 
 ```bash
-pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.1.1
+pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.2.0
 ```
 
 Select `chrysaki` in `/settings` or set:
@@ -20,11 +20,14 @@ The package pins [`chrysaki-core` v1.0.0](https://github.com/Kiriketsuki/chrysak
 
 ## Interface
 
-- **Responsive footer:** one cached line in narrow tmux panes; model, thinking, context, branch, divergence, and change telemetry at wider widths.
+For the intended docked layout, set **TUI mode** to `fullscreen` in Pi's `/settings` (or launch with `pi --tui-mode fullscreen`). Pi owns this host setting; extensions cannot change it programmatically.
+
+
+- **Responsive footer:** one cached line in narrow tmux panes; a four-line telemetry deck at wide widths with model, thinking, 5-hour/7-day limits, context, token usage, cache usage, cost, branch, divergence, numstat, and changed files.
 - **Context rail:** right-anchored overlay at 120 columns and above. Automatic promotion never overrides a manual pin or hide choice.
 - **Mini Git:** read-only branch, status, numstat, and bounded `● ┆ ╌` history. Git failures preserve the last snapshot and never disable core UI.
 - **Command deck:** press `Ctrl+Shift+P` or run `/chrysaki-deck`. Entries, availability, help, and handlers derive from one registry.
-- **Practical Vim:** starts in Insert mode. Escape enters Normal; `v` enters Visual. Unsupported printable sequences show a hint without changing the input.
+- **Practical Vim:** optional and disabled by default. When enabled it starts in Insert mode; Escape enters Normal and `v` enters Visual.
 - **Minimal motion:** a static Chrysaki jewel is the default working indicator. The Deep Work preset uses a restrained pulse.
 
 ## Commands
@@ -59,7 +62,7 @@ Settings are stored in `~/.pi/agent/chrysaki-pi.json` only after a user changes 
 - auto-promotion
 - minimal/off motion
 - Git module visibility
-- Practical Vim enabled/start mode
+- Practical Vim enabled/start mode (disabled by default)
 - compact/comfortable density
 
 ## Optional tmux forwarding

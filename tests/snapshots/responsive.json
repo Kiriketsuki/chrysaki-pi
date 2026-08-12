@@ -1,11 +1,15 @@
 {
   "narrow": [
-    "⬢ GPT-5  main ±1 ↑git"
+    "⬢ GPT-5 · high · ctx 41% ·  main ±1 ↑git"
   ],
   "standard": [
-    "⬢ CHRYSAKI  GPT-5 · high                                         main ↑1  ±1  ctx 41k/100k 41% ↑git"
+    "⬢ CHRYSAKI  GPT-5 · high                                                   ctx 41k/100k 41% · $0.123",
+    "↓13k ↑3.2k cache 8.5k                                                                  main ±1 ↑git"
   ],
   "wide": [
-    "⬢ CHRYSAKI  GPT-5 · high                                                                                                     main ↑1  ±1  ctx 41k/100k 41% ↑git"
+    "━━  ⬢ GPT-5 ━━━━━━━━                                                                                                      workspace/project  openai-codex · high",
+    "▰ 5h ◆◆◇◇◇◇◇◇ 31%                                                                                                                      ▱ 7d ◆◆◆◆◇◇◇◇ 48%  $0.123",
+    "▰ ctx ◆◆◆◇◇◇◇◇ 41% (41k/100k)                                                                                                        ↓ 13k  ↑ 3.2k  cache ⧈ 8.5k",
+    "⎇ main ↑1  ⊙ abc                                                                                                                             +1 -0  1 files ↑git"
   ]
 }

@@ -12,7 +12,7 @@ test("settings validate ranges and fail closed", () => {
 
 test("settings persist atomically only when explicitly saved", async () => {
   const directory = await mkdtemp(join(tmpdir(), "chrysaki-settings-")); const path = join(directory, "settings.json");
-  const defaults = await loadSettings(path); assert.equal(defaults.railThreshold, 120);
+  const defaults = await loadSettings(path); assert.equal(defaults.railThreshold, 120); assert.equal(defaults.editorEnabled, false);
   await saveSettings({ ...defaults, railThreshold: 140 }, path);
   assert.equal((JSON.parse(await readFile(path, "utf8"))).railThreshold, 140);
 });

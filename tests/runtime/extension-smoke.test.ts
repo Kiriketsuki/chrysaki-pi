@@ -29,10 +29,10 @@ test("extension registers resources and survives a complete lifecycle", async ()
     custom(factory: any, options: any) { let finish!: () => void; const promise = new Promise<void>((resolve) => { finish = resolve; }); factory(tui, theme, {}, finish); options?.onHandle?.(handle); return promise; },
     notify() {},
   };
-  const ctx: any = { mode: "tui", cwd: process.cwd(), ui, model: { id: "test", provider: "test", contextWindow: 1000 }, thinkingLevel: "medium", sessionManager: { getSessionId: () => "session" }, getContextUsage: () => ({ tokens: 100 }) };
+  const ctx: any = { mode: "tui", cwd: process.cwd(), ui, model: { id: "test", provider: "test", contextWindow: 1000 }, thinkingLevel: "medium", sessionManager: { getSessionId: () => "session", getBranch: () => [] }, getContextUsage: () => ({ tokens: 100 }) };
   for (const handler of events.get("session_start") ?? []) await handler({ reason: "startup" }, ctx);
   for (const handler of events.get("resources_discover") ?? []) await handler({ reason: "startup", cwd: ctx.cwd }, ctx);
-  assert.ok(footer); assert.ok(header); assert.ok(editorFactory);
+  assert.ok(footer); assert.ok(header); assert.equal(editorFactory, undefined);
   assert.ok(footer.render(80).every((line: string) => line.length <= 80)); assert.ok(header.render(80).length > 0);
   for (const handler of events.get("session_shutdown") ?? []) await handler({ reason: "reload" }, ctx);
   assert.equal(footer, undefined); assert.equal(header, undefined); assert.equal(editorFactory, undefined); assert.equal(workingReset, true);

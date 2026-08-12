@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { GitCollector } from "./collectors/git.ts";
+import { RateLimitCollector } from "./collectors/rate-limits.ts";
 import { collectSession } from "./collectors/session.ts";
 import { CommandRegistry, helpLines, type CommandDefinition } from "./commands/registry.ts";
 import { findPreset, PRESETS } from "./commands/presets.ts";
@@ -23,6 +24,7 @@ interface Runtime {
   store: StateStore<UiSnapshot>;
   processes: BoundedProcessRunner;
   git: GitCollector;
+  rateLimits: RateLimitCollector;
   scheduler: RefreshScheduler;
   disposal: DisposalRegistry;
   sidebar: SidebarAdapter;
@@ -140,12 +142,16 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
     const store = new StateStore(initialSnapshot(settings));
     const processes = disposal.add(new BoundedProcessRunner());
     const git = disposal.add(new GitCollector(processes.run));
+    const rateLimits = disposal.add(new RateLimitCollector(processes.run));
     const sidebar = disposal.add(new SidebarAdapter());
-    const active = { ctx, settings: { ...settings }, store, processes, git, disposal, sidebar, renders: 0 } as Runtime;
+    const active = { ctx, settings: { ...settings }, store, processes, git, rateLimits, disposal, sidebar, renders: 0 } as Runtime;
     const scheduler = disposal.add(new RefreshScheduler(async (reasons) => {
-      const snapshot = await git.refresh(reasons.join(","));
+      const [gitSnapshot, rateLimitSnapshot] = await Promise.all([
+        git.refresh(reasons.join(",")),
+        rateLimits.refresh(active.ctx.model?.provider ?? ""),
+      ]);
       if (active !== runtime) return;
-      store.update({ git: snapshot }); refreshSession(active);
+      store.update({ git: gitSnapshot, rateLimits: rateLimitSnapshot }); refreshSession(active);
     }, 75));
     active.scheduler = scheduler; runtime = active;
     git.start({ cwd: ctx.cwd }); refreshSession(active); scheduler.request("session-start");

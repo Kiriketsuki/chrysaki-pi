@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
 export interface ProcessResult { stdout: string; stderr: string; code: number | null; killed: boolean; truncated: boolean; }
-export interface ProcessOptions { cwd?: string; timeoutMs?: number; maxBytes?: number; signal?: AbortSignal; env?: NodeJS.ProcessEnv; }
+export interface ProcessOptions { cwd?: string; timeoutMs?: number; maxBytes?: number; signal?: AbortSignal; env?: NodeJS.ProcessEnv; input?: string; }
 export type ProcessRunner = (command: string, args: readonly string[], options?: ProcessOptions) => Promise<ProcessResult>;
 
 export class BoundedProcessRunner {
@@ -15,7 +15,7 @@ export class BoundedProcessRunner {
       cwd: options.cwd,
       env: options.env,
       detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     this.children.add(child);
     let stdout = "";
@@ -28,6 +28,7 @@ export class BoundedProcessRunner {
       truncated = true;
       return Buffer.from(next).subarray(0, maxBytes).toString("utf8");
     };
+    if (options.input !== undefined) child.stdin?.end(options.input);
     child.stdout?.on("data", (chunk) => { stdout = append(stdout, chunk); });
     child.stderr?.on("data", (chunk) => { stderr = append(stderr, chunk); });
     const terminate = () => {

@@ -10,7 +10,7 @@ const theme: any = { fg: (_role: string, text: string) => text, bold: (text: str
 
 test("responsive narrow, standard, and wide snapshots remain stable", () => {
   const base = initialSnapshot();
-  const store = new StateStore<UiSnapshot>({ ...base, model: "GPT-5", thinkingLevel: "high", contextTokens: 41_000, contextWindow: 100_000, contextPercent: 41, git: { available: true, branch: "main", commit: "abc", ahead: 1, behind: 0, files: [{ path: "a.ts", indexStatus: " ", worktreeStatus: "M", added: 1, deleted: 0 }], graph: [], collectedAt: 1 }, rail: { ...base.rail, promoted: "git" as const, promotedCount: 1 } });
+  const store = new StateStore<UiSnapshot>({ ...base, cwd: "/workspace/project", provider: "openai-codex", model: "GPT-5", thinkingLevel: "high", contextTokens: 41_000, contextWindow: 100_000, contextPercent: 41, usage: { input: 12_500, output: 3_200, cacheRead: 8_000, cacheWrite: 500, costUsd: 0.123 }, rateLimits: { available: true, fiveHour: { usedPercent: 31 }, sevenDay: { usedPercent: 48 }, collectedAt: 1 }, git: { available: true, branch: "main", commit: "abc", ahead: 1, behind: 0, files: [{ path: "a.ts", indexStatus: " ", worktreeStatus: "M", added: 1, deleted: 0 }], graph: [], collectedAt: 1 }, rail: { ...base.rail, promoted: "git" as const, promotedCount: 1 } });
   const footer = new ChrysakiFooter(store, theme, () => {});
   assert.deepEqual({ narrow: footer.render(60), standard: footer.render(100), wide: footer.render(160) }, expected);
   footer.dispose();

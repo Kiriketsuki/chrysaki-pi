@@ -29,6 +29,27 @@ export interface GitSnapshot {
   collectedAt: number;
 }
 
+export interface RateLimitWindow {
+  usedPercent: number;
+  resetsAt?: number;
+}
+
+export interface RateLimitSnapshot {
+  available: boolean;
+  fiveHour?: RateLimitWindow;
+  sevenDay?: RateLimitWindow;
+  collectedAt: number;
+  error?: string;
+}
+
+export interface SessionUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costUsd: number;
+}
+
 export interface RailState {
   visibility: RailVisibility;
   threshold: number;
@@ -49,6 +70,8 @@ export interface UiSnapshot {
   cwd: string;
   activeProcesses: readonly string[];
   activeTool?: string;
+  usage: SessionUsage;
+  rateLimits: RateLimitSnapshot;
   git: GitSnapshot;
   rail: RailState;
   updatedAt: number;
@@ -69,7 +92,7 @@ export const DEFAULT_SETTINGS: Readonly<ChrysakiSettings> = Object.freeze({
   autoPromotion: true,
   motion: "minimal",
   showGit: true,
-  editorEnabled: true,
+  editorEnabled: false,
   editorStartMode: "insert",
   density: "comfortable",
 });
@@ -94,6 +117,8 @@ export function initialSnapshot(settings: ChrysakiSettings = DEFAULT_SETTINGS): 
     sessionId: "",
     cwd: process.cwd(),
     activeProcesses: Object.freeze([]),
+    usage: Object.freeze({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 }),
+    rateLimits: Object.freeze({ available: false, collectedAt: 0 }),
     git: EMPTY_GIT,
     rail: Object.freeze({
       visibility: "auto",

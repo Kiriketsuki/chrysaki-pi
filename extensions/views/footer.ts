@@ -1,10 +1,32 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { UiSnapshot } from "../runtime/types.ts";
 import type { StateStore } from "../runtime/store.ts";
+import type { RateLimitWindow, UiSnapshot } from "../runtime/types.ts";
 import { columns, fit, formatCount } from "./layout.ts";
 
 export type FooterMode = "compact" | "rich";
 export function footerMode(width: number): FooterMode { return width < 100 ? "compact" : "rich"; }
+
+function bar(percent: number, cells = 8): string {
+  const filled = Math.max(0, Math.min(cells, Math.round(percent / 100 * cells)));
+  return "◆".repeat(filled) + "◇".repeat(cells - filled);
+}
+function resetIn(epoch?: number): string {
+  if (!epoch) return "";
+  const seconds = Math.max(0, epoch - Math.floor(Date.now() / 1000));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor(seconds % 86400 / 3600);
+  const minutes = Math.floor(seconds % 3600 / 60);
+  return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+function rate(theme: Theme, label: string, window?: RateLimitWindow): string {
+  if (!window) return theme.fg("dim", `${label} unavailable`);
+  const role = window.usedPercent >= 75 ? "error" : window.usedPercent >= 50 ? "warning" : "success";
+  const reset = resetIn(window.resetsAt);
+  return theme.fg(role, `${label} ${bar(window.usedPercent)} ${window.usedPercent.toFixed(0)}%${reset ? ` (${reset})` : ""}`);
+}
+function repositoryStats(state: UiSnapshot): { added: number; deleted: number } {
+  return state.git.files.reduce((total, file) => ({ added: total.added + file.added, deleted: total.deleted + file.deleted }), { added: 0, deleted: 0 });
+}
 
 export class ChrysakiFooter {
   private cache = new Map<number, string[]>();
@@ -21,16 +43,28 @@ export class ChrysakiFooter {
     const branch = state.git.available ? state.git.branch ?? "HEAD" : "no-git";
     const changes = state.git.files.length;
     const promoted = state.rail.promotedCount ? ` ↑${state.rail.promoted ?? "context"}` : "";
-    let line: string;
+    let result: string[];
     if (footerMode(width) === "compact") {
-      line = `${this.theme.fg("accent", "⬢")} ${fit(state.model, Math.max(8, width - 24))} ${this.theme.fg("muted", ` ${branch}${changes ? ` ±${changes}` : ""}${promoted}`)}`;
-    } else {
-      const left = `${this.theme.fg("accent", "⬢ CHRYSAKI")}  ${this.theme.fg("text", state.model)} ${this.theme.fg("muted", `· ${state.thinkingLevel}`)}`;
+      const context = state.contextWindow ? `${state.contextPercent.toFixed(0)}%` : "—";
+      result = [fit(`${this.theme.fg("accent", "⬢")} ${fit(state.model, Math.max(8, width - 30))} ${this.theme.fg("muted", `· ${state.thinkingLevel} · ctx ${context} ·  ${branch}${changes ? ` ±${changes}` : ""}${promoted}`)}`, width)];
+    } else if (width < 140) {
       const context = `${formatCount(state.contextTokens)}/${formatCount(state.contextWindow)} ${state.contextPercent.toFixed(0)}%`;
-      const right = this.theme.fg("muted", ` ${branch}${state.git.ahead ? ` ↑${state.git.ahead}` : ""}${state.git.behind ? ` ↓${state.git.behind}` : ""}${changes ? `  ±${changes}` : ""}  ctx ${context}${promoted}`);
-      line = columns(left, right, width);
+      result = [
+        columns(`${this.theme.fg("accent", "⬢ CHRYSAKI")}  ${this.theme.fg("text", state.model)} · ${state.thinkingLevel}`, this.theme.fg("muted", `ctx ${context} · $${state.usage.costUsd.toFixed(3)}`), width),
+        columns(this.theme.fg("muted", `↓${formatCount(state.usage.input)} ↑${formatCount(state.usage.output)} cache ${formatCount(state.usage.cacheRead + state.usage.cacheWrite)}`), this.theme.fg("muted", ` ${branch}${changes ? ` ±${changes}` : ""}${promoted}`), width),
+      ].map((line) => fit(line, width));
+    } else {
+      const repo = repositoryStats(state);
+      const cwd = state.cwd.split(/[\\/]/).filter(Boolean).slice(-2).join("/") || state.cwd;
+      const contextRole = state.contextPercent >= 85 ? "error" : state.contextPercent >= 60 ? "warning" : "success";
+      const context = `${bar(state.contextPercent)} ${state.contextPercent.toFixed(0)}% (${formatCount(state.contextTokens)}/${formatCount(state.contextWindow)})`;
+      result = [
+        columns(`${this.theme.fg("accent", "━━  ⬢")} ${this.theme.bold(state.model)} ${this.theme.fg("borderMuted", "━━━━━━━━")}`, `${this.theme.fg("accent", cwd)}  ${this.theme.fg("muted", `${state.provider} · ${state.thinkingLevel}`)}`, width),
+        columns(rate(this.theme, "▰ 5h", state.rateLimits.fiveHour), `${rate(this.theme, "▱ 7d", state.rateLimits.sevenDay)}  ${this.theme.fg("warning", `$${state.usage.costUsd.toFixed(3)}`)}`, width),
+        columns(this.theme.fg(contextRole, `▰ ctx ${context}`), `${this.theme.fg("muted", `↓ ${formatCount(state.usage.input)}  ↑ ${formatCount(state.usage.output)}  cache ⧈ ${formatCount(state.usage.cacheRead + state.usage.cacheWrite)}`)}`, width),
+        columns(this.theme.fg("muted", `⎇ ${branch}${state.git.ahead ? ` ↑${state.git.ahead}` : ""}${state.git.behind ? ` ↓${state.git.behind}` : ""}  ⊙ ${state.git.commit ?? "—"}`), `${this.theme.fg("success", `+${repo.added}`)} ${this.theme.fg("error", `-${repo.deleted}`)}  ${changes} files${promoted}`, width),
+      ].map((line) => fit(line, width));
     }
-    const result = [fit(line, width)];
     this.cache.set(width, result);
     return result;
   }
