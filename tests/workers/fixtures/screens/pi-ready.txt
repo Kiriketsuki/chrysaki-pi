@@ -1,0 +1,4 @@
+Pi coding agent
+Model: anthropic/sonnet
+Type your message
+> 

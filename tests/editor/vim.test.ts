@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ChrysakiEditor } from "../../extensions/editor/chrysaki-editor.ts";
 import { PracticalVimEditor } from "../../extensions/editor/practical-vim.ts";
 import { VimEngine, type VimResult } from "../../extensions/editor/vim-core.ts";
 
@@ -48,9 +49,19 @@ test("search, next match, and unsupported sequences are safe", () => {
   assert.equal(unsupported.text, next.text); assert.match(unsupported.hint, /Unsupported/);
 });
 
+const tui: any = { terminal: { rows: 30 }, requestRender() {} };
+const theme: any = { borderColor: (text: string) => text, selectList: {} };
+
+test("Chrysaki editor applies input padding and translates Ctrl+Backspace", () => {
+  const keybindings: any = { matches: () => false };
+  const editor = new ChrysakiEditor(tui, theme, keybindings);
+  assert.equal(editor.getPaddingX(), 2);
+  editor.setText("hello world");
+  editor.handleInput("\x1b[127;5u");
+  assert.equal(editor.getText(), "hello ");
+});
+
 test("Normal-mode Escape delegates Pi's application interrupt", () => {
-  const tui: any = { terminal: { rows: 30 }, requestRender() {} };
-  const theme: any = { borderColor: (text: string) => text, selectList: {} };
   const keybindings: any = { matches: (data: string, action: string) => action === "app.interrupt" && data === "\x1b" };
   const editor = new PracticalVimEditor(tui, theme, keybindings, "normal");
   let interrupted = 0; editor.onEscape = () => { interrupted++; };

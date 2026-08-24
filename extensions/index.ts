@@ -1,14 +1,16 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { getSettingsListTheme, isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 import { GitCollector } from "./collectors/git.ts";
 import { RateLimitCollector } from "./collectors/rate-limits.ts";
 import { collectSession } from "./collectors/session.ts";
 import { CommandRegistry, helpLines, type CommandDefinition } from "./commands/registry.ts";
 import { findPreset, PRESETS } from "./commands/presets.ts";
+import { ChrysakiEditor } from "./editor/chrysaki-editor.ts";
 import { PracticalVimEditor } from "./editor/practical-vim.ts";
 import { DisposalRegistry } from "./runtime/disposal.ts";
 import { BoundedProcessRunner } from "./runtime/process.ts";
+import { installRapidScroll } from "./runtime/rapid-scroll.ts";
 import { RefreshScheduler } from "./runtime/scheduler.ts";
 import { loadSettings, saveSettings } from "./runtime/settings.ts";
 import { StateStore } from "./runtime/store.ts";
@@ -17,6 +19,11 @@ import { CommandDeck } from "./views/command-deck.ts";
 import { ChrysakiFooter } from "./views/footer.ts";
 import { ChrysakiHeader } from "./views/header.ts";
 import { RailComponent, SidebarAdapter, promoteModule, railVisible } from "./views/rail.ts";
+import { modelShellBlockReason } from "./workers/enforcement.ts";
+import type { WorkerBroker } from "./workers/broker.ts";
+import { summarizeWorker } from "./workers/render.ts";
+import { createChrysakiWorkerRuntime, type ChrysakiWorkerRuntime } from "./workers/runtime.ts";
+import { registerWorkerTools } from "./workers/tools.ts";
 
 interface Runtime {
   ctx: ExtensionContext | any;
@@ -29,13 +36,23 @@ interface Runtime {
   disposal: DisposalRegistry;
   sidebar: SidebarAdapter;
   renders: number;
+  rapidScrollInstalled: boolean;
+  workers?: ChrysakiWorkerRuntime;
+  workerError?: string;
 }
 interface CommandContext { ctx: ExtensionContext; runtime: Runtime; }
 
-export default async function chrysakiPi(pi: ExtensionAPI) {
+export interface ChrysakiExtensionOptions { readonly createWorkerRuntime?: () => Promise<ChrysakiWorkerRuntime>; }
+
+export default async function chrysakiPi(pi: ExtensionAPI, options: ChrysakiExtensionOptions = {}) {
   let settings = await loadSettings();
   let runtime: Runtime | undefined;
   const registry = new CommandRegistry<CommandContext>();
+  const workerBroker = (): WorkerBroker => {
+    if (!runtime?.workers) throw new Error(runtime?.workerError ?? "Chrysaki worker runtime is not active for this session");
+    return runtime.workers.broker;
+  };
+  registerWorkerTools(pi, workerBroker);
 
   const refreshSession = (active: Runtime) => {
     active.store.update(collectSession(active.ctx, active.store.get()));
@@ -44,12 +61,17 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
   };
   const setRailVisibility = (active: Runtime, visibility: "auto" | "pinned" | "hidden") => {
     active.store.update((state) => ({ rail: Object.freeze({ ...state.rail, visibility }) }));
-    if (visibility === "hidden") active.sidebar.hide(); else active.sidebar.pin();
+    if (visibility === "hidden") active.sidebar.collapse(); else active.sidebar.pin();
   };
   const promote = (active: Runtime, module: RailModule) => {
-    active.store.update((state) => ({ rail: promoteModule(state.rail, module) }));
+    active.store.update((state) => ({ rail: promoteModule(state.rail.visibility === "hidden" ? { ...state.rail, visibility: "auto" } : state.rail, module) }));
     active.sidebar.promote();
   };
+  const showGit = (active: Runtime, focus = false) => {
+    active.store.update((state) => ({ rail: promoteModule({ ...state.rail, visibility: "pinned" }, "git") }));
+    if (focus) active.sidebar.focus(); else active.sidebar.promote();
+  };
+  const hideGit = (active: Runtime) => setRailVisibility(active, "hidden");
 
   async function openDeck(ctx: ExtensionContext, active: Runtime): Promise<void> {
     if (ctx.mode !== "tui") return;
@@ -65,9 +87,10 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
     { id: "view.rail-auto", label: "Rail: Auto", category: "View", description: "Show promoted context at 120+ columns", handler: ({ runtime }) => setRailVisibility(runtime, "auto") },
     { id: "view.rail-pin", label: "Rail: Pin", category: "View", description: "Keep the context rail visible when space permits", handler: ({ runtime }) => setRailVisibility(runtime, "pinned") },
     { id: "view.rail-hide", label: "Rail: Hide", category: "View", description: "Hide the context rail", handler: ({ runtime }) => setRailVisibility(runtime, "hidden") },
-    { id: "git.promote", label: "Show Git Context", category: "Git", description: "Promote the read-only mini Lazygit module", available: ({ runtime }) => runtime.store.get().git.available, handler: ({ runtime }) => promote(runtime, "git") },
+    { id: "git.promote", label: "Show Git Panel", category: "Git", description: "Show the read-only Git panel", available: ({ runtime }) => runtime.store.get().git.available && !runtime.sidebar.isVisible(), handler: ({ runtime }) => showGit(runtime) },
+    { id: "git.hide", label: "Hide Git Panel", category: "Git", description: "Collapse the active Git panel and return focus to the editor", keyHint: "Ctrl+Shift+H", available: ({ runtime }) => runtime.sidebar.isVisible(), handler: ({ runtime }) => hideGit(runtime) },
     { id: "git.refresh", label: "Refresh Git", category: "Git", description: "Request a bounded asynchronous Git refresh", handler: ({ runtime }) => runtime.scheduler.request("command:git") },
-    { id: "git.focus", label: "Focus Git Panel", category: "Git", description: "Focus the floating panel for Alt+Arrow move and resize controls", keyHint: "Ctrl+Shift+G", handler: ({ runtime }) => runtime.sidebar.focus() },
+    { id: "git.focus", label: "Focus Git Panel", category: "Git", description: "Show and focus the panel for Alt+Arrow move and resize controls", keyHint: "Ctrl+Shift+G", handler: ({ runtime }) => showGit(runtime, true) },
     { id: "model.cycle-thinking", label: "Cycle Thinking", category: "Model", description: "Cycle the active model's thinking level", keyHint: "Shift+Tab", handler: ({ ctx }) => ctx.ui.notify("Use Shift+Tab to cycle thinking without overriding Pi defaults", "info") },
     { id: "session.context", label: "Show Session Context", category: "Session", description: "Promote model, context, and session telemetry", handler: ({ runtime }) => promote(runtime, "context") },
     ...PRESETS.map((preset): CommandDefinition<CommandContext> => ({ id: `preset.${preset.id}`, label: preset.label, category: "Preset", description: `${preset.thinkingLevel} thinking · ${preset.density} UI · ${preset.railPolicy} rail`, handler: ({ ctx, runtime }) => applyPreset(preset.id, ctx, runtime) })),
@@ -132,12 +155,37 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
     if (option === "pin") setRailVisibility(runtime, "pinned"); else if (option === "hide") setRailVisibility(runtime, "hidden"); else if (option === "git" || option === "context") promote(runtime, option); else setRailVisibility(runtime, "auto");
     ctx.ui.notify(`Rail: ${option || "auto"}`, "info");
   } });
+  pi.registerCommand("chrysaki-git", { description: "Control Git panel: show, focus, hide, toggle", handler: async (args, ctx) => {
+    if (!runtime) return;
+    const option = args.trim() || "toggle";
+    if (option === "hide" || (option === "toggle" && runtime.sidebar.isVisible())) hideGit(runtime);
+    else showGit(runtime, option === "focus");
+    ctx.ui.notify(`Git panel: ${runtime.sidebar.isVisible() ? "shown" : "hidden"}`, "info");
+  } });
   pi.registerCommand("chrysaki-help", { description: "Show Chrysaki commands and Practical Vim help", handler: async (_args, ctx) => { if (runtime) await registry.execute("help.commands", { ctx, runtime }); } });
   pi.registerCommand("chrysaki-settings", { description: "Configure the Chrysaki interface", handler: async (_args, ctx) => { if (runtime) await showSettings(ctx, runtime); } });
   pi.registerCommand("chrysaki-preset", { description: "Apply focused, deep-work, or minimal preset", getArgumentCompletions: (prefix) => PRESETS.filter((preset) => preset.id.startsWith(prefix)).map((preset) => ({ value: preset.id, label: preset.label })), handler: async (args, ctx) => { if (runtime) await applyPreset(args.trim() || "focused", ctx, runtime); } });
+  pi.registerCommand("workers", { description: "List persisted Chrysaki workers", handler: async (_args, ctx) => {
+    if (!runtime) return; const jobs = await workerBroker().status();
+    const lines = ["Chrysaki Workers", jobs.length ? `${jobs.length} persisted worker${jobs.length === 1 ? "" : "s"}` : "No persisted workers", ...jobs.map((job) => { const item = summarizeWorker(job); return `${item.id}  ${item.state}${item.adapter ? `  ${item.adapter}` : ""}${item.progress ? `  ${item.progress}` : ""}`; })];
+    if (ctx.mode === "tui") await showHelp(ctx, lines); else ctx.ui.notify(lines.join(" · "), "info");
+  } });
+  pi.registerCommand("worker", { description: "Worker controls: reveal|status|cancel|cleanup [job-id]", getArgumentCompletions: (prefix) => ["reveal", "status", "cancel", "cleanup"].filter((item) => item.startsWith(prefix)).map((item) => ({ value: item, label: item })), handler: async (args, ctx) => {
+    if (!runtime) return; const [action, jobId, ...rest] = args.trim().split(/\s+/).filter(Boolean); const broker = workerBroker();
+    if (!action || !["reveal", "status", "cancel", "cleanup"].includes(action)) { ctx.ui.notify("Usage: /worker reveal|status|cancel|cleanup [job-id]", "warning"); return; }
+    if (action !== "cleanup" && !jobId) { ctx.ui.notify(`Usage: /worker ${action} <job-id>`, "warning"); return; }
+    if (action === "reveal") { const result = await broker.reveal(jobId!); ctx.ui.notify(result.mode === "split" ? `Revealed ${jobId} in ${result.paneId ?? "a tmux split"}` : result.command, "info"); return; }
+    if (action === "status") { const [job] = await broker.status([jobId!]); const item = summarizeWorker(job); ctx.ui.notify(`${item.id}: ${item.state}${item.adapter ? ` · ${item.adapter}` : ""}${item.progress ? ` · ${item.progress}` : ""}`, "info"); return; }
+    if (action === "cancel") { const [job] = await broker.cancel([jobId!], rest.join(" ") || "Cancelled by /worker"); ctx.ui.notify(`${job.job.id}: ${job.status.state}`, "info"); return; }
+    const results = await broker.cleanup(jobId ? [jobId] : undefined); ctx.ui.notify(results.length ? results.map((item) => `${item.jobId}: ${item.retained ? `retained (${item.reason})` : "cleaned"}`).join(" · ") : "No terminal workers to clean", results.some((item) => item.retained) ? "warning" : "info");
+  } });
   pi.registerCommand("chrysaki-debug", { description: "Show cached-render and collector diagnostics", handler: async (_args, ctx) => { if (!runtime) return; const before = performance.now(); const footer = new ChrysakiFooter(runtime.store, ctx.ui.theme, () => {}); for (let index = 0; index < 10_000; index++) footer.render(index % 2 ? 80 : 160); const elapsed = performance.now() - before; footer.dispose(); ctx.ui.notify(`10k cached footer renders: ${elapsed.toFixed(1)}ms · children ${runtime.processes.activeCount} · subscriptions ${runtime.store.subscriptionCount}`, "info"); } });
   pi.registerShortcut("ctrl+shift+p", { description: "Open Chrysaki command deck", handler: async (ctx) => { if (runtime) await openDeck(ctx, runtime); } });
-  pi.registerShortcut("ctrl+shift+g", { description: "Focus the Chrysaki Git panel", handler: async () => { runtime?.sidebar.focus(); } });
+  // Ghostty reserves Ctrl+Shift+P for its own palette. Keep it for terminals
+  // that pass it through and provide a reliable in-app alternative.
+  pi.registerShortcut("ctrl+shift+k", { description: "Open Chrysaki command deck", handler: async (ctx) => { if (runtime) await openDeck(ctx, runtime); } });
+  pi.registerShortcut("ctrl+shift+g", { description: "Show and focus the Chrysaki Git panel", handler: async () => { if (runtime) showGit(runtime, true); } });
+  pi.registerShortcut("ctrl+shift+h", { description: "Hide the Chrysaki Git panel", handler: async () => { if (runtime) hideGit(runtime); } });
 
   pi.on("session_start", async (_event, ctx) => {
     const disposal = new DisposalRegistry();
@@ -146,7 +194,7 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
     const git = disposal.add(new GitCollector(processes.run));
     const rateLimits = disposal.add(new RateLimitCollector(processes.run));
     const sidebar = disposal.add(new SidebarAdapter());
-    const active = { ctx, settings: { ...settings }, store, processes, git, rateLimits, disposal, sidebar, renders: 0 } as Runtime;
+    const active = { ctx, settings: { ...settings }, store, processes, git, rateLimits, disposal, sidebar, renders: 0, rapidScrollInstalled: false } as Runtime;
     const scheduler = disposal.add(new RefreshScheduler(async (reasons) => {
       const [gitSnapshot, rateLimitSnapshot] = await Promise.all([
         git.refresh(reasons.join(",")),
@@ -156,6 +204,14 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
       store.update({ git: gitSnapshot, rateLimits: rateLimitSnapshot }); refreshSession(active);
     }, 75));
     active.scheduler = scheduler; runtime = active;
+    try {
+      const workers = disposal.add(await (options.createWorkerRuntime ?? createChrysakiWorkerRuntime)()); active.workers = workers;
+      const recovery = await workers.start();
+      if (recovery.invalid.length) ctx.ui.notify(`Worker recovery retained ${recovery.invalid.length} invalid mailbox${recovery.invalid.length === 1 ? "" : "es"} for inspection`, "warning");
+    } catch (error) {
+      active.workerError = `Worker runtime unavailable (no worker launched): ${error instanceof Error ? error.message : String(error)}`;
+      ctx.ui.notify(active.workerError, "warning");
+    }
     git.start({ cwd: ctx.cwd }); refreshSession(active); scheduler.request("session-start");
   });
 
@@ -163,33 +219,53 @@ export default async function chrysakiPi(pi: ExtensionAPI) {
     const active = runtime; if (!active || ctx.mode !== "tui") return;
     ctx.ui.setHeader((_tui, theme) => new ChrysakiHeader(theme));
     ctx.ui.setWorkingIndicator({ frames: [ctx.ui.theme.fg("accent", "◆")] });
-    ctx.ui.setFooter((tui, theme) => new ChrysakiFooter(active.store, theme, () => { active.renders++; tui.requestRender(); }));
-    if (active.settings.editorEnabled) ctx.ui.setEditorComponent((tui, theme, keybindings) => new PracticalVimEditor(tui, theme, keybindings, active.settings.editorStartMode));
-    let closeRail = () => {};
-    let rail: RailComponent | undefined;
-    void ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-      rail = new RailComponent(active.store, theme, tui, () => active.sidebar.unfocus());
-      closeRail = done;
-      return rail;
-    }, {
-      overlay: true,
-      overlayOptions: () => ({
-        anchor: "right-center",
-        width: `${rail?.layout.width ?? 30}%`,
-        minWidth: 34,
-        maxHeight: `${rail?.layout.height ?? 72}%`,
-        margin: 1,
-        offsetX: rail?.layout.offsetX ?? 0,
-        offsetY: rail?.layout.offsetY ?? 0,
-        visible: (width) => railVisible(active.store.get().rail, width),
-      }),
-      onHandle: (handle) => { active.sidebar.show(handle, closeRail); handle.unfocus(); },
+    ctx.ui.setFooter((tui, theme) => {
+      if (!active.rapidScrollInstalled) { active.rapidScrollInstalled = true; active.disposal.add(installRapidScroll(tui)); }
+      return new ChrysakiFooter(active.store, theme, () => { active.renders++; tui.requestRender(); });
     });
+    ctx.ui.setEditorComponent((tui, theme, keybindings) => active.settings.editorEnabled
+      ? new PracticalVimEditor(tui, theme, keybindings, active.settings.editorStartMode)
+      : new ChrysakiEditor(tui, theme, keybindings));
+    const mountRail = () => {
+      if (runtime !== active) return;
+      let closeRail = () => {};
+      let remountQueued = false;
+      const remount = () => {
+        if (remountQueued || runtime !== active) return;
+        remountQueued = true;
+        closeRail();
+        queueMicrotask(mountRail);
+      };
+      const layout = active.sidebar.layout;
+      void ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+        closeRail = done;
+        return new RailComponent(active.store, theme, tui, layout, () => active.sidebar.unfocus(), remount);
+      }, {
+        overlay: true,
+        overlayOptions: {
+          anchor: "right-center",
+          width: `${layout.width}%`,
+          minWidth: 34,
+          maxHeight: `${layout.height}%`,
+          margin: 1,
+          offsetX: layout.offsetX,
+          offsetY: layout.offsetY,
+          visible: (width) => railVisible(active.store.get().rail, width),
+        },
+        onHandle: (handle) => active.sidebar.show(handle, closeRail, remount),
+      });
+    };
+    mountRail();
   });
 
   pi.on("model_select", (_event, ctx) => { if (runtime) { runtime.ctx = ctx; refreshSession(runtime); } });
   pi.on("thinking_level_select", (_event, ctx) => { if (runtime) { runtime.ctx = ctx; refreshSession(runtime); } });
   pi.on("turn_end", (_event, ctx) => { if (runtime) { runtime.ctx = ctx; refreshSession(runtime); runtime.scheduler.request("turn-end"); } });
+  pi.on("tool_call", (event) => {
+    if (!isToolCallEventType("bash", event)) return;
+    const reason = modelShellBlockReason(event.input.command);
+    if (reason) return { block: true, reason };
+  });
   pi.on("tool_execution_start", (event) => { if (!runtime) return; runtime.store.update((state) => ({ activeTool: event.toolName, activeProcesses: Object.freeze([...state.activeProcesses, event.toolName]) })); refreshSession(runtime); });
   pi.on("tool_execution_end", (event) => { if (!runtime) return; runtime.store.update((state) => ({ activeTool: undefined, activeProcesses: Object.freeze(state.activeProcesses.filter((name) => name !== event.toolName)) })); if (event.toolName === "bash" || event.toolName.includes("git")) runtime.scheduler.request(`tool:${event.toolName}`); refreshSession(runtime); });
   pi.on("session_shutdown", async (_event, ctx) => {

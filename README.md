@@ -7,7 +7,7 @@ A responsive Chrysaki Precision interface suite for [Pi](https://github.com/eare
 ## Install
 
 ```bash
-pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.2.7
+pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.2.8
 ```
 
 Select `chrysaki` in `/settings` or set:
@@ -25,8 +25,9 @@ For the intended docked layout, set **TUI mode** to `fullscreen` in Pi's `/setti
 
 - **Responsive footer:** one cached line in narrow tmux panes; a four-line telemetry deck at wide widths with model, thinking, 5-hour/7-day limits, context, token usage, cache usage, cost, branch, divergence, numstat, and changed files.
 - **Context rail:** right-anchored overlay at 120 columns and above. Automatic promotion never overrides a manual pin or hide choice.
-- **Mini Git:** read-only branch, status, numstat, and bounded `● ┆ ╌` history. Git failures preserve the last snapshot and never disable core UI.
-- **Command deck:** press `Ctrl+Shift+P` or run `/chrysaki-deck`. Entries, availability, help, and handlers derive from one registry.
+- **Mini Git:** read-only branch, status, numstat, and bounded `● ┆ ╌` history with a sharp Chrysaki border. Focus with `Ctrl+Shift+G`, hide with `Ctrl+Shift+H`, move with `Alt+Arrows`, resize with `Alt+Shift+Arrows`, and return to the editor with `Esc`. Git failures preserve the last snapshot and never disable core UI.
+- **Rapid scroll:** in fullscreen mode, hold the middle mouse button and drag above or below the anchor point to scroll the transcript at distance-sensitive speed.
+- **Command deck:** press `Ctrl+Shift+K` or run `/chrysaki-deck` (`Ctrl+Shift+P` remains available where the terminal does not reserve it). Entries, availability, help, and handlers derive from one registry.
 - **Practical Vim:** optional and disabled by default. When enabled it starts in Insert mode; Escape enters Normal and `v` enters Visual.
 - **Minimal motion:** a static Chrysaki jewel is the default working indicator. The Deep Work preset uses a restrained pulse.
 
@@ -36,6 +37,7 @@ For the intended docked layout, set **TUI mode** to `fullscreen` in Pi's `/setti
 |:--|:--|
 | `/chrysaki-deck` | Open the fuzzy command deck |
 | `/chrysaki-rail [auto\|pin\|hide\|git\|context]` | Control or promote the rail |
+| `/chrysaki-git [show\|focus\|hide\|toggle]` | Show, focus, collapse, or toggle the Git panel |
 | `/chrysaki-preset [focused\|deep-work\|minimal]` | Apply thinking, tools, density, rail, and indicator policy |
 | `/chrysaki-settings` | Persist package settings after explicit user changes |
 | `/chrysaki-help` | Show registry-generated command help |
