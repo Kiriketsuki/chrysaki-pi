@@ -23,11 +23,10 @@ async function harness(options: { readonly fakeClock?: boolean; readonly dirtyCl
     recognizeScreen() { return { state: "ready" }; }, answerPrompt() { return undefined; },
     async interrupt(context) { interrupts.push(context.jobId); }, completionHelper: "mailbox-instructions",
   };
+  const selection = () => ({ adapterId: "pi", adapter, executablePath: executable, probe: { available: true, authenticated: true, sandboxSupported: true, capabilities: ["code"] }, attempts: [{ adapterId: "pi", eligible: true, executablePath: executable }], selectedAt: new Date().toISOString() });
   const router: any = {
-    async routeForJob(job: WorkerJob) {
-      routeCalls++;
-      return { job: bindAdapterSelection(job, "pi"), selection: { adapterId: "pi", adapter, executablePath: executable, probe: { available: true, authenticated: true, sandboxSupported: true, capabilities: ["code"] }, attempts: [{ adapterId: "pi", eligible: true, executablePath: executable }], selectedAt: new Date().toISOString() } };
-    },
+    async route() { routeCalls++; return selection(); },
+    async routeForJob(job: WorkerJob) { routeCalls++; return { job: bindAdapterSelection(job, "pi"), selection: selection() }; },
   };
   const cleanedWorkspaces: string[] = [];
   const workspaces: any = {
@@ -42,11 +41,13 @@ async function harness(options: { readonly fakeClock?: boolean; readonly dirtyCl
   };
   const profileRequests: any[] = [];
   const sandbox: any = {
+    async preflight() { return { available: true, usable: true, version: "test" }; },
     async createProfile(request: any) { profileRequests.push(request); return { active: true, jobId: request.jobId, binary: "bwrap", homePath: "/home/worker", guestCwd: "/workspace", mounts: [], baseArgs: [], environment: request.environment ?? {}, authPaths: [] }; },
     buildArgv(_profile: any, argv: readonly string[]) { return ["bwrap", "--", ...argv]; },
   };
   const sessions = new Set<string>();
   const tmux: any = {
+    async preflight() { return { available: true, version: "tmux test" }; },
     async launch(request: any) { const name = `chrysaki-${request.jobId}`; sessions.add(name); return { name, jobId: request.jobId, ownerId: request.ownerId }; },
     async hasSession(name: string) { return sessions.has(name); }, async capturePane() { return "ready"; },
     async paste(session: string, text: string) { prompts.push({ session, text }); }, async interrupt() {},
@@ -80,6 +81,20 @@ test("explicit invocation concurrency overrides workflow/global defaults and sch
   await Promise.all(spawned.jobs.map((entry, index) => complete(entry.job, entry.status, `result-${index}`)));
   const waited = await item.broker.wait({ jobIds: spawned.jobs.map((entry) => entry.job.id), completion: "all" });
   assert.deepEqual(waited.map((entry) => entry.result), ["result-0", "result-1", "result-2", "result-3", "result-4"]);
+});
+
+test("preflight resolves routing and admission without creating artifacts", async () => {
+  const item = await harness(); const result = await item.broker.preflight({ tasks: ["one", "two"], access: "read", capabilities: ["code"], cwd: item.source }, { parentSessionId: "/sessions/parent.jsonl" });
+  assert.equal(result.sideEffectFree, true); assert.equal(result.requested, 2); assert.deepEqual(result.items.map((entry) => entry.childIndex), [0, 1]);
+  await assert.rejects(() => stat(item.jobs), { code: "ENOENT" }); assert.equal(item.sessions.size, 0);
+  const doctor = await item.broker.doctor("/sessions/parent.jsonl"); assert.equal(doctor.ok, true); assert.equal((doctor.tmux as any).available, true);
+});
+
+test("dispatch persists launch contracts and deterministic routing evidence", async () => {
+  const item = await harness(); const spawned = await item.broker.spawn({ task: "contract", access: "read", capabilities: ["code"], cwd: item.source }, { parentSessionId: "/sessions/parent.jsonl" }); const entry = spawned.jobs[0];
+  const metadata = JSON.parse(await readFile(workerMailboxPaths(item.jobs, entry.job.id).metadata, "utf8"));
+  assert.match(entry.job.launchContractDigest ?? "", /^[0-9a-f]{64}$/); assert.equal(metadata.launchContract.digest, entry.job.launchContractDigest); assert.equal(metadata.launchContract.taskDigest.length, 64); assert.equal(metadata.launchContract.routing.attempts[0].adapterId, "pi");
+  await item.broker.cancel([entry.job.id], "test cleanup");
 });
 
 test("dispatch persists stable run, parent-session, and child identities", async () => {
@@ -157,6 +172,13 @@ test("worker_wait supports any and count completion without mutating pending job
   await complete(spawned.jobs[2].job, spawned.jobs[2].status, "third");
   const count = await item.broker.wait({ jobIds: spawned.jobs.map((entry) => entry.job.id), completion: 2 }); assert.equal(count.filter((entry) => entry.status.state === "completed").length, 2); assert.equal(count[0].status.state, "running");
   await item.broker.cancel([spawned.jobs[0].job.id], "test cleanup");
+});
+
+test("reconciliation accepts legacy records without launch-contract fields", async () => {
+  const item = await harness(); const spawned = await item.broker.spawn({ task: "legacy", access: "read", cwd: item.source }); const entry = spawned.jobs[0]; const paths = workerMailboxPaths(item.jobs, entry.job.id);
+  const metadata = JSON.parse(await readFile(paths.metadata, "utf8")); delete metadata.launchContract; delete metadata.job.launchContractDigest; await writeFile(paths.metadata, `${JSON.stringify(metadata)}\n`);
+  item.broker.dispose(); const replacement = item.restart(); const recovered = await replacement.reconcile();
+  assert.equal(recovered.recovered, 1); assert.equal((await replacement.status([entry.job.id]))[0].job.launchContractDigest, undefined); await replacement.cancel([entry.job.id], "test cleanup"); replacement.dispose();
 });
 
 test("reconciliation recovers live tmux workers across reload and replacement sessions", async () => {

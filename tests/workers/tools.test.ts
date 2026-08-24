@@ -15,6 +15,7 @@ function result(text = "authoritative result") {
 function harness(text?: string) {
   const tools = new Map<string, any>(); const calls: any[] = []; const entry = result(text);
   const broker: any = {
+    async preflight(input: any, options: any) { calls.push(["preflight", input, options]); return { ok: true, sideEffectFree: true, runId: "run_12345678-1234-4123-8123-123456789abc", parentSessionId: "session", requested: input.tasks?.length ?? 1, concurrency: input.concurrency ?? 1, ceiling: {}, admission: { active: 0, sessionSpawns: 0, runSpawns: 0 }, items: [] }; },
     async run(input: any, options: any) { calls.push(["run", input, options]); return { ownerId: "owner", concurrency: input.concurrency ?? 2, jobs: [entry] }; },
     async spawn(input: any, options: any) { calls.push(["spawn", input, options]); return { ownerId: "owner", concurrency: 1, jobs: [entry] }; },
     async wait(input: any) { calls.push(["wait", input]); return [entry]; }, async status() { return [entry]; },
@@ -30,11 +31,16 @@ const theme: any = { fg: (_role: string, value: string) => value, bold: (value: 
 
 test("registers the complete worker tool contract with StringEnum-compatible schemas", () => {
   const { tools } = harness();
-  assert.deepEqual([...tools.keys()].sort(), ["worker_cancel", "worker_reveal", "worker_run", "worker_send", "worker_spawn", "worker_status", "worker_wait"]);
+  assert.deepEqual([...tools.keys()].sort(), ["worker_cancel", "worker_preflight", "worker_reveal", "worker_run", "worker_send", "worker_spawn", "worker_status", "worker_wait"]);
   const dispatch = tools.get("worker_run").parameters;
   assert.deepEqual(dispatch.properties.access.enum, ["read", "write"]);
   assert.deepEqual(dispatch.properties.preferredCli.enum, ["pi", "claude", "codex"]);
   assert.equal(JSON.stringify(dispatch).includes("anyOf"), false);
+});
+
+test("worker_preflight is side-effect-free and forwards exact parent ownership", async () => {
+  const { tools, calls } = harness(); const output = await tools.get("worker_preflight").execute("preflight-call", { task: "inspect", access: "read" }, undefined, undefined, { cwd: "/repo", sessionManager: { getSessionFile: () => "/sessions/parent.jsonl" } });
+  assert.equal(calls[0][0], "preflight"); assert.equal(calls[0][1].cwd, "/repo"); assert.equal(calls[0][2].parentSessionId, "/sessions/parent.jsonl"); assert.match(output.content[0].text, /sideEffectFree/);
 });
 
 test("worker_run forwards invocation ownership, cwd, cancellation, and compact persisted details", async () => {

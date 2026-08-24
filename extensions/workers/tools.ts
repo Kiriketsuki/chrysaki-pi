@@ -68,6 +68,14 @@ export function registerWorkerTools(pi: ExtensionAPI | any, getBroker: () => Wor
   const inherited = parseInheritedWorkerContext();
   const ownership = (toolCallId: string, ctx: any) => ({ ownerId: toolCallId, parentSessionId: ctx.sessionManager?.getSessionFile?.() ?? ctx.sessionManager?.getSessionId?.() ?? `ephemeral:${ctx.cwd}`, depth: inherited.depth, ...(inherited.parentRunId ? { parentRunId: inherited.parentRunId } : {}), ...(inherited.ceiling ? { capabilityCeiling: inherited.ceiling } : {}) });
   pi.registerTool({
+    name: "worker_preflight", label: "Chrysaki Worker Preflight", description: "Resolve worker admission, capability ceiling, confinement, routing, model, and task digests without launching workers or creating artifacts.",
+    parameters: DispatchSchema, ...renderer("preflight"),
+    async execute(id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {
+      const result = await getBroker().preflight(dispatch(params, ctx.cwd), { signal, ...ownership(id, ctx) });
+      return { content: [{ type: "text" as const, text: bounded(`worker_preflight: ${result.requested} task${result.requested === 1 ? "" : "s"}\n${JSON.stringify(result, null, 2)}`) }], details: { operation: "preflight", summaries: [] } };
+    },
+  });
+  pi.registerTool({
     name: "worker_run", label: "Chrysaki Worker Run", description: "Run one or more model tasks in sandboxed interactive tmux workers and wait for authoritative mailbox results. Output is bounded; full artifacts remain on disk.",
     promptSnippet: "Run delegated model work in interactive sandboxed tmux workers",
     promptGuidelines: ["Use worker_run instead of invoking Pi, Claude, Codex, or another model CLI through bash."],

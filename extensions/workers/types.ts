@@ -124,6 +124,7 @@ export const WorkerJobSchema = Type.Object({
   parentRunId: Type.Optional(RunIdSchema),
   childIndex: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
   depth: Type.Optional(Type.Integer({ minimum: 0, maximum: 64 })),
+  launchContractDigest: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
   failure: Type.Optional(WorkerFailureSchema),
   cleanupDeadline: Type.Optional(TimestampSchema),
 }, { additionalProperties: false });
@@ -146,6 +147,7 @@ export interface WorkerJob {
   readonly parentRunId?: string;
   readonly childIndex?: number;
   readonly depth?: number;
+  readonly launchContractDigest?: string;
   readonly failure?: WorkerFailure;
   readonly cleanupDeadline?: string;
 }

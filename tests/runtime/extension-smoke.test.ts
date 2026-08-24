@@ -18,7 +18,7 @@ test("extension registers resources and survives a complete lifecycle", async ()
   const workerRuntime: any = { broker: { status: async () => [] }, start: async () => { workerStarts++; return { recovered: 0, active: 0, terminal: 0, invalid: [], cleanup: [] }; }, dispose: () => { workerDisposals++; } };
   await chrysakiPi(pi, { createWorkerRuntime: async () => workerRuntime });
   assert.ok(commands.includes("chrysaki-deck")); assert.ok(commands.includes("chrysaki-git")); assert.ok(commands.includes("workers")); assert.ok(commands.includes("worker"));
-  assert.deepEqual(tools.sort(), ["worker_cancel", "worker_reveal", "worker_run", "worker_send", "worker_spawn", "worker_status", "worker_wait"]);
+  assert.deepEqual(tools.sort(), ["worker_cancel", "worker_preflight", "worker_reveal", "worker_run", "worker_send", "worker_spawn", "worker_status", "worker_wait"]);
   assert.ok(shortcuts.includes("ctrl+shift+p")); assert.ok(shortcuts.includes("ctrl+shift+k"));
   assert.ok(shortcuts.includes("ctrl+shift+h"));
   const toolCall = events.get("tool_call")?.[0]; assert.ok(toolCall);

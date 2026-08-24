@@ -77,6 +77,12 @@ export class TmuxTransport {
     return result;
   }
 
+  async preflight(): Promise<{ readonly available: boolean; readonly version?: string; readonly reason?: string }> {
+    const result = await this.execute(["-V"], undefined, true);
+    if (result.code !== 0) return Object.freeze({ available: false, reason: result.stderr.trim() || `tmux exited ${result.code}` });
+    return Object.freeze({ available: true, version: result.stdout.trim() || undefined });
+  }
+
   async launch(request: TmuxLaunchRequest): Promise<TmuxSession> {
     const name = tmuxSessionName(request.jobId);
     if (!request.ownerId.trim()) throw new TmuxTransportError("Tmux owner ID is required");

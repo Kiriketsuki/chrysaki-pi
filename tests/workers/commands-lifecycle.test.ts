@@ -13,6 +13,7 @@ const entry: any = {
 test("worker commands own one recoverable runtime and shutdown idempotently", async () => {
   const events = new Map<string, Function[]>(); const commands = new Map<string, any>(); const notifications: string[] = []; const actions: string[] = []; let starts = 0; let disposals = 0;
   const broker: any = {
+    async doctor() { actions.push("doctor"); return { ok: true, tmux: { available: true, version: "tmux test" }, sandbox: { usable: true, version: "bwrap test" }, admission: { active: 1 } }; },
     async status(ids?: string[]) { actions.push(`status:${ids?.join(",") ?? "all"}`); return [entry]; },
     async reveal() { actions.push("reveal"); return { mode: "attach-command", command: "'tmux' 'attach-session' '-t' 'safe'", argv: [] }; },
     async cancel() { actions.push("cancel"); return [{ ...entry, status: { ...entry.status, state: "cancelled" } }]; },
@@ -25,14 +26,15 @@ test("worker commands own one recoverable runtime and shutdown idempotently", as
   };
   await chrysakiPi(pi, { createWorkerRuntime: async () => runtime });
   const ui: any = { theme: { fg: (_role: string, text: string) => text }, notify(message: string) { notifications.push(message); }, setFooter() {}, setHeader() {}, setEditorComponent() {}, setWorkingIndicator() {} };
-  const ctx: any = { mode: "json", cwd: process.cwd(), ui, model: { provider: "test", id: "test", contextWindow: 1_000 }, thinkingLevel: "medium", sessionManager: { getSessionId: () => "session", getBranch: () => [] }, getContextUsage: () => ({ tokens: 0 }) };
+  const ctx: any = { mode: "json", cwd: process.cwd(), ui, model: { provider: "test", id: "test", contextWindow: 1_000 }, thinkingLevel: "medium", sessionManager: { getSessionId: () => "session", getSessionFile: () => undefined, getBranch: () => [] }, getContextUsage: () => ({ tokens: 0 }) };
   for (const handler of events.get("session_start") ?? []) await handler({ reason: "reload" }, ctx);
   await commands.get("workers").handler("", ctx);
+  await commands.get("worker").handler("doctor", ctx);
   await commands.get("worker").handler(`status ${id}`, ctx);
   await commands.get("worker").handler(`reveal ${id}`, ctx);
   await commands.get("worker").handler(`cancel ${id} requested`, ctx);
   await commands.get("worker").handler(`cleanup ${id}`, ctx);
-  assert.equal(starts, 1); assert.deepEqual(actions, ["status:all", `status:${id}`, "reveal", "cancel", `cleanup:${id}`]);
+  assert.equal(starts, 1); assert.deepEqual(actions, ["status:all", "doctor", `status:${id}`, "reveal", "cancel", `cleanup:${id}`]);
   assert.ok(notifications.some((message) => message.includes("dirty worktree"))); assert.ok(notifications.some((message) => message.includes("attach-session")));
   for (const handler of events.get("session_shutdown") ?? []) await handler({ reason: "reload" }, ctx);
   for (const handler of events.get("session_shutdown") ?? []) await handler({ reason: "reload" }, ctx);

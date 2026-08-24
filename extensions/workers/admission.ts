@@ -80,6 +80,18 @@ export class WorkerAdmissionController {
     };
   }
 
+  async checkBatch(sessionId: string, runId: string, requested: number, ceiling?: WorkerCapabilityCeiling): Promise<void> {
+    await this.exclusive(async () => {
+      await this.initialize(); const counts = this.counts(sessionId, runId);
+      const activeLimit = Math.min(this.config.maxActiveWorkers, ceiling?.maxActiveWorkers ?? this.config.maxActiveWorkers);
+      const runLimit = Math.min(this.config.maxSpawnsPerRun, ceiling?.maxSpawnsPerRun ?? this.config.maxSpawnsPerRun);
+      const sessionLimit = Math.min(this.config.maxSpawnsPerSession, ceiling?.maxSpawnsPerSession ?? this.config.maxSpawnsPerSession);
+      if (counts.active + requested > activeLimit) throw new WorkerAdmissionError(`Worker active limit exceeded: ${counts.active} + ${requested} > ${activeLimit}`);
+      if (counts.run + requested > runLimit) throw new WorkerAdmissionError(`Worker run spawn budget exceeded: ${counts.run} + ${requested} > ${runLimit}`);
+      if (counts.session + requested > sessionLimit) throw new WorkerAdmissionError(`Worker session spawn budget exceeded: ${counts.session} + ${requested} > ${sessionLimit}`);
+    });
+  }
+
   async claimBatch(identities: readonly AdmissionIdentity[], ceiling?: WorkerCapabilityCeiling): Promise<void> {
     if (!identities.length) throw new WorkerAdmissionError("Admission requires at least one worker");
     const { runId, sessionId } = identities[0];
