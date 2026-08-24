@@ -8,6 +8,7 @@ import { WorkerRouter } from "./router.ts";
 import { SandboxManager } from "./sandbox.ts";
 import { TmuxTransport } from "./tmux.ts";
 import { WorkspaceManager } from "./workspaces.ts";
+import { parseInheritedWorkerContext } from "./capability-ceiling.ts";
 
 export interface ChrysakiWorkerRuntimeOptions {
   readonly config?: WorkerConfig;
@@ -44,6 +45,7 @@ export async function createChrysakiWorkerRuntime(options: ChrysakiWorkerRuntime
   });
   const adapters = [new PiWorkerAdapter(adapterOptions("pi")), new ClaudeWorkerAdapter(adapterOptions("claude")), new CodexWorkerAdapter(adapterOptions("codex"))];
   const router = new WorkerRouter({ config, adapters, sandbox });
-  const broker = new WorkerBroker({ config, router, workspaces, sandbox, tmux, jobsRoot: join(agentDirectory, "workers", "jobs"), archiveRoot: join(agentDirectory, "workers", "archive") });
+  const inherited = parseInheritedWorkerContext();
+  const broker = new WorkerBroker({ config, router, workspaces, sandbox, tmux, jobsRoot: join(agentDirectory, "workers", "jobs"), archiveRoot: join(agentDirectory, "workers", "archive"), inheritedCeiling: inherited.ceiling });
   return new ChrysakiWorkerRuntime(broker, tmux, sandbox, workspaces);
 }

@@ -40,8 +40,9 @@ async function harness(options: { readonly fakeClock?: boolean; readonly dirtyCl
       cleanedWorkspaces.push(jobId); return { removed: true, retained: false, dirty: false };
     },
   };
+  const profileRequests: any[] = [];
   const sandbox: any = {
-    async createProfile(request: any) { return { active: true, jobId: request.jobId, binary: "bwrap", homePath: "/home/worker", guestCwd: "/workspace", mounts: [], baseArgs: [], environment: {}, authPaths: [] }; },
+    async createProfile(request: any) { profileRequests.push(request); return { active: true, jobId: request.jobId, binary: "bwrap", homePath: "/home/worker", guestCwd: "/workspace", mounts: [], baseArgs: [], environment: request.environment ?? {}, authPaths: [] }; },
     buildArgv(_profile: any, argv: readonly string[]) { return ["bwrap", "--", ...argv]; },
   };
   const sessions = new Set<string>();
@@ -58,7 +59,7 @@ async function harness(options: { readonly fakeClock?: boolean; readonly dirtyCl
     ...(options.fakeClock ? { now: () => clock, sleep: async (milliseconds: number, signal?: AbortSignal) => { signal?.throwIfAborted(); clock += Math.max(milliseconds, 1_001); } } : {}),
   };
   const broker = new WorkerBroker(brokerOptions);
-  return { broker, restart: () => new WorkerBroker(brokerOptions), config, root, source, jobs, adapter, router, workspaces, sandbox, tmux, prompts, interrupts, updates, sessions, cleanedWorkspaces, advance: (milliseconds: number) => { clock += milliseconds; }, get routeCalls() { return routeCalls; }, get maxWorkspaceActive() { return maxWorkspaceActive; } };
+  return { broker, restart: () => new WorkerBroker(brokerOptions), config, root, source, jobs, adapter, router, workspaces, sandbox, tmux, prompts, interrupts, updates, sessions, cleanedWorkspaces, profileRequests, advance: (milliseconds: number) => { clock += milliseconds; }, get routeCalls() { return routeCalls; }, get maxWorkspaceActive() { return maxWorkspaceActive; } };
 }
 
 async function complete(job: WorkerJob, previous: WorkerStatusFile, text: string) {
@@ -82,13 +83,23 @@ test("explicit invocation concurrency overrides workflow/global defaults and sch
 });
 
 test("dispatch persists stable run, parent-session, and child identities", async () => {
-  const item = await harness(); const runId = `run_12345678-1234-4123-8123-123456789abc`;
+  const item = await harness({ config: { capabilityCeiling: { maxDepth: 3 } } }); const runId = `run_12345678-1234-4123-8123-123456789abc`;
   const spawned = await item.broker.spawn({ tasks: ["one", "two"], access: "read", cwd: item.source }, { ownerId: "tool-call", runId, parentSessionId: "/sessions/parent.jsonl", depth: 2 });
   assert.equal(spawned.runId, runId); assert.equal(spawned.parentSessionId, "/sessions/parent.jsonl");
   assert.deepEqual(spawned.jobs.map((entry) => ({ runId: entry.job.runId, session: entry.job.parentSessionId, index: entry.job.childIndex, depth: entry.job.depth })), [
     { runId, session: "/sessions/parent.jsonl", index: 0, depth: 2 }, { runId, session: "/sessions/parent.jsonl", index: 1, depth: 2 },
   ]);
   await item.broker.cancel(spawned.jobs.map((entry) => entry.job.id), "test cleanup");
+});
+
+test("capability ceilings reject widening and propagate monotonically into child sandboxes", async () => {
+  const item = await harness({ config: { capabilityCeiling: { allowedAdapters: ["pi"], maxAccess: "read", allowedCapabilities: ["code"], maxDepth: 2, maxActiveWorkers: 2 } } });
+  await assert.rejects(() => item.broker.spawn({ task: "write", access: "write", cwd: item.source }, { parentSessionId: "session" }), /read-only ceiling/);
+  await assert.rejects(() => item.broker.spawn({ task: "image", access: "read", capabilities: ["images"], cwd: item.source }, { parentSessionId: "session" }), /capabilities exceed ceiling/);
+  const spawned = await item.broker.spawn({ task: "read", access: "read", capabilities: ["code"], cwd: item.source }, { parentSessionId: "session", capabilityCeiling: { maxAccess: "write", allowedAdapters: ["pi", "claude"] } });
+  const inherited = JSON.parse(item.profileRequests[0].environment.CHRYS_WORKER_CAPABILITY_CEILING);
+  assert.equal(inherited.maxAccess, "read"); assert.deepEqual(inherited.allowedAdapters, ["pi"]); assert.equal(item.profileRequests[0].environment.CHRYS_WORKER_DEPTH, "1");
+  await item.broker.cancel([spawned.jobs[0].job.id], "test cleanup");
 });
 
 test("admission rejects an oversized batch before creating mailboxes or sessions", async () => {

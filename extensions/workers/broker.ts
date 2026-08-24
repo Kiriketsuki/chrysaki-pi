@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import { WorkerAdmissionController, defaultAdmissionPath } from "./admission.ts";
+import { WORKER_CEILING_ENV, WORKER_DEPTH_ENV, WORKER_PARENT_RUN_ENV, assertWorkerRequestWithinCeiling, filterRoutingByCeiling, serializeWorkerCapabilityCeiling, tightenWorkerCapabilityCeiling } from "./capability-ceiling.ts";
 import { dirname, join, parse, resolve } from "node:path";
 import { resolveWorkerPolicy } from "./config.ts";
 import { WorkerValidationError, validateWorkerJob, validateWorkerRequest, validateWorkerStatus } from "./jobs.ts";
@@ -8,7 +9,7 @@ import { atomicWriteJson, initializeMailbox, readAuthoritativeResult, readWorker
 import type { AdapterSelection, WorkerRouter } from "./router.ts";
 import type { SandboxManager, SandboxProfile } from "./sandbox.ts";
 import type { RevealResult, TmuxSession, TmuxTransport } from "./tmux.ts";
-import { createWorkerId, createWorkerRunId, WORKER_SCHEMA_VERSION, isTerminalWorkerState, type JsonValue, type ResolvedWorkerPolicy, type WorkerAdapter, type WorkerConfig, type WorkerFailure, type WorkerJob, type WorkerRequest, type WorkerState, type WorkerStatusFile } from "./types.ts";
+import { createWorkerId, createWorkerRunId, WORKER_SCHEMA_VERSION, isTerminalWorkerState, type JsonValue, type ResolvedWorkerPolicy, type WorkerAdapter, type WorkerCapabilityCeiling, type WorkerConfig, type WorkerFailure, type WorkerJob, type WorkerRequest, type WorkerState, type WorkerStatusFile } from "./types.ts";
 import type { WorkspaceManager } from "./workspaces.ts";
 
 export interface WorkerTaskInput { readonly task: string; readonly role?: string; readonly metadata?: Readonly<Record<string, JsonValue>>; }
@@ -62,6 +63,7 @@ export interface WorkerBrokerOptions {
   readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   readonly onUpdate?: (update: WorkerUpdate) => void;
   readonly admission?: WorkerAdmissionController;
+  readonly inheritedCeiling?: WorkerCapabilityCeiling;
 }
 
 interface ManagedJob {
@@ -77,6 +79,7 @@ interface ManagedJob {
   lastMailboxError?: string;
   refreshPromise?: Promise<void>;
   policy?: ResolvedWorkerPolicy;
+  ceiling?: WorkerCapabilityCeiling;
   routingAttempts?: readonly unknown[];
   retainedReason?: string;
 }
@@ -120,6 +123,7 @@ export class WorkerBroker {
   private readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   private readonly onUpdate?: (update: WorkerUpdate) => void;
   private readonly admission: WorkerAdmissionController;
+  private readonly inheritedCeiling: WorkerCapabilityCeiling;
   private readonly jobs = new Map<string, ManagedJob>();
   private cleanupTimer?: NodeJS.Timeout;
   private monitorTimer?: NodeJS.Timeout;
@@ -133,6 +137,7 @@ export class WorkerBroker {
     this.root = resolve(options.jobsRoot ?? workerJobsRoot()); this.archiveRoot = resolve(options.archiveRoot ?? join(dirname(this.root), "archive")); this.startupTimeoutMs = options.startupTimeoutMs ?? 30_000;
     this.pollIntervalMs = options.pollIntervalMs ?? 200; this.now = options.now ?? Date.now; this.sleep = options.sleep ?? defaultSleep; this.onUpdate = options.onUpdate;
     this.admission = options.admission ?? new WorkerAdmissionController(defaultAdmissionPath(this.root), this.config);
+    this.inheritedCeiling = options.inheritedCeiling ? tightenWorkerCapabilityCeiling(this.config.capabilityCeiling, options.inheritedCeiling) : this.config.capabilityCeiling;
   }
 
   private async persist(managed: ManagedJob): Promise<void> {
@@ -141,6 +146,7 @@ export class WorkerBroker {
       status: managed.status,
       ...(managed.routingAttempts ? { routingAttempts: managed.routingAttempts } : {}),
       ...(managed.policy ? { policy: managed.policy } : {}),
+      ...(managed.ceiling ? { capabilityCeiling: managed.ceiling } : {}),
       ...(managed.lastMailboxError ? { lastMailboxError: boundedText(managed.lastMailboxError, 8_192) } : {}),
       ...(managed.retainedReason ? { retainedReason: managed.retainedReason } : {}),
     });
@@ -197,13 +203,13 @@ export class WorkerBroker {
     await this.persist(managed); if (terminal) await this.admission.releaseExecution(managed.job.id); this.emit(managed); if (terminal) this.scheduleCleanup();
   }
 
-  private async createManaged(request: WorkerRequest, ownerId: string, policy: ResolvedWorkerPolicy, identity: { readonly id: string; readonly runId: string; readonly parentSessionId: string; readonly parentRunId?: string; readonly childIndex: number; readonly depth: number }): Promise<ManagedJob> {
+  private async createManaged(request: WorkerRequest, ownerId: string, policy: ResolvedWorkerPolicy, ceiling: WorkerCapabilityCeiling, identity: { readonly id: string; readonly runId: string; readonly parentSessionId: string; readonly parentRunId?: string; readonly childIndex: number; readonly depth: number }): Promise<ManagedJob> {
     const id = identity.id; const paths = workerMailboxPaths(this.root, id); const timestamp = new Date(this.now()).toISOString();
     await initializeMailbox(paths, request, { ownerId, concurrency: policy.concurrency, concurrencySource: policy.source.concurrency });
     const status: WorkerStatusFile = { schemaVersion: WORKER_SCHEMA_VERSION, jobId: id, state: "queued", createdAt: timestamp, updatedAt: timestamp, progress: "Queued for interactive startup" };
     await writeWorkerStatus(paths, status);
     const job: WorkerJob = Object.freeze({ schemaVersion: WORKER_SCHEMA_VERSION, id, request, state: "queued", createdAt: timestamp, updatedAt: timestamp, mailboxPath: paths.directory, ownerId, runId: identity.runId, parentSessionId: identity.parentSessionId, ...(identity.parentRunId ? { parentRunId: identity.parentRunId } : {}), childIndex: identity.childIndex, depth: identity.depth });
-    const managed: ManagedJob = { job, status, paths, ownerId, policy }; this.jobs.set(id, managed); await this.persist(managed); await this.admission.commitJob(id); this.emit(managed); return managed;
+    const managed: ManagedJob = { job, status, paths, ownerId, policy, ceiling }; this.jobs.set(id, managed); await this.persist(managed); await this.admission.commitJob(id); this.emit(managed); return managed;
   }
 
   private async archiveDiagnostics(managed: ManagedJob): Promise<void> {
@@ -231,7 +237,7 @@ export class WorkerBroker {
         jobId: managed.job.id, lease, mailboxPath: managed.paths.directory, cwd: managed.job.request.cwd,
         authReadOnlyPaths: [...this.config.sandbox.authReadOnlyPaths, ...(managed.adapter.authBindings?.() ?? [])],
         runtimeReadOnlyPaths: [...(managed.adapter.runtimeReadOnlyPaths ?? []), runtimeRoot],
-        environment: managed.adapter.sandboxEnvironment?.() ?? {},
+        environment: { ...(managed.adapter.sandboxEnvironment?.() ?? {}), [WORKER_CEILING_ENV]: serializeWorkerCapabilityCeiling(managed.ceiling ?? this.inheritedCeiling), [WORKER_DEPTH_ENV]: String((managed.job.depth ?? 0) + 1), [WORKER_PARENT_RUN_ENV]: managed.job.runId ?? managed.ownerId },
       });
       const adapterArgv = managed.adapter.buildInteractiveArgv({ confinementActive: true, executablePath, job: managed.job, workspacePath: "/workspace", mailboxPath: "/mailbox", homePath: "/home/worker", model: this.config.adapters[managed.adapter.id].model, interactiveArgs: this.config.adapters[managed.adapter.id].interactiveArgs });
       const launchArgv = this.sandbox.buildArgv(managed.profile, adapterArgv);
@@ -280,16 +286,19 @@ export class WorkerBroker {
     });
   }
 
-  private async spawnOwned(input: WorkerDispatchInput, identity: { readonly ownerId: string; readonly runId: string; readonly parentSessionId: string; readonly parentRunId?: string; readonly depth: number }, signal?: AbortSignal): Promise<WorkerBatchResult> {
-    const policy = resolveWorkerPolicy(this.config, input.workflow, { concurrency: input.concurrency, timeoutMs: input.timeoutMs, retentionMs: input.retentionMs, preferredCli: input.preferredCli, allowFallback: input.allowFallback });
-    const requests = this.expand(input, policy); const managed: ManagedJob[] = new Array(requests.length); let next = 0;
+  private async spawnOwned(input: WorkerDispatchInput, identity: { readonly ownerId: string; readonly runId: string; readonly parentSessionId: string; readonly parentRunId?: string; readonly depth: number; readonly requestedCeiling?: Partial<WorkerCapabilityCeiling> }, signal?: AbortSignal): Promise<WorkerBatchResult> {
+    const workflowCeiling = input.workflow ? this.config.workflows[input.workflow]?.capabilityCeiling : undefined;
+    const ceiling = tightenWorkerCapabilityCeiling(tightenWorkerCapabilityCeiling(this.inheritedCeiling, workflowCeiling), identity.requestedCeiling);
+    const basePolicy = resolveWorkerPolicy(this.config, input.workflow, { concurrency: input.concurrency, timeoutMs: input.timeoutMs, retentionMs: input.retentionMs, preferredCli: input.preferredCli, allowFallback: input.allowFallback });
+    const policy: ResolvedWorkerPolicy = Object.freeze({ ...basePolicy, concurrency: Math.min(basePolicy.concurrency, ceiling.maxActiveWorkers), routingOrder: filterRoutingByCeiling(basePolicy.routingOrder, ceiling) });
+    const requests = this.expand(input, policy); requests.forEach((request) => assertWorkerRequestWithinCeiling(request, ceiling, identity.depth)); const managed: ManagedJob[] = new Array(requests.length); let next = 0;
     const identities = requests.map((_request, childIndex) => ({ jobId: createWorkerId(), runId: identity.runId, sessionId: identity.parentSessionId, childIndex }));
-    await this.admission.claimBatch(identities);
+    await this.admission.claimBatch(identities, ceiling);
     const workers = Array.from({ length: Math.min(policy.concurrency, requests.length) }, async () => {
       while (true) {
         const index = next++; if (index >= requests.length) return;
         const workerIdentity = identities[index];
-        const job = await this.createManaged(requests[index], identity.ownerId, policy, { id: workerIdentity.jobId, runId: identity.runId, parentSessionId: identity.parentSessionId, ...(identity.parentRunId ? { parentRunId: identity.parentRunId } : {}), childIndex: index, depth: identity.depth }); managed[index] = job; await this.launch(job, policy, signal);
+        const job = await this.createManaged(requests[index], identity.ownerId, policy, ceiling, { id: workerIdentity.jobId, runId: identity.runId, parentSessionId: identity.parentSessionId, ...(identity.parentRunId ? { parentRunId: identity.parentRunId } : {}), childIndex: index, depth: identity.depth }); managed[index] = job; await this.launch(job, policy, signal);
       }
     });
     try { await Promise.all(workers); }
@@ -297,15 +306,15 @@ export class WorkerBroker {
     return Object.freeze({ ownerId: identity.ownerId, runId: identity.runId, parentSessionId: identity.parentSessionId, concurrency: policy.concurrency, jobs: Object.freeze(await Promise.all(managed.map((job) => this.result(job)))) });
   }
 
-  async spawn(input: WorkerDispatchInput, options: { readonly signal?: AbortSignal; readonly ownerId?: string; readonly runId?: string; readonly parentSessionId?: string; readonly parentRunId?: string; readonly depth?: number } = {}): Promise<WorkerBatchResult> {
+  async spawn(input: WorkerDispatchInput, options: { readonly signal?: AbortSignal; readonly ownerId?: string; readonly runId?: string; readonly parentSessionId?: string; readonly parentRunId?: string; readonly depth?: number; readonly capabilityCeiling?: Partial<WorkerCapabilityCeiling> } = {}): Promise<WorkerBatchResult> {
     const runId = options.runId ?? createWorkerRunId(); const ownerId = options.ownerId ?? `owner-${randomUUID()}`; const parentSessionId = options.parentSessionId ?? ownerId;
-    return this.spawnOwned(input, { ownerId, runId, parentSessionId, ...(options.parentRunId ? { parentRunId: options.parentRunId } : {}), depth: options.depth ?? 0 }, options.signal);
+    return this.spawnOwned(input, { ownerId, runId, parentSessionId, ...(options.parentRunId ? { parentRunId: options.parentRunId } : {}), depth: options.depth ?? 0, ...(options.capabilityCeiling ? { requestedCeiling: options.capabilityCeiling } : {}) }, options.signal);
   }
 
-  async run(input: WorkerDispatchInput, options: { readonly signal?: AbortSignal; readonly ownerId?: string; readonly runId?: string; readonly parentSessionId?: string; readonly parentRunId?: string; readonly depth?: number } = {}): Promise<WorkerBatchResult> {
+  async run(input: WorkerDispatchInput, options: { readonly signal?: AbortSignal; readonly ownerId?: string; readonly runId?: string; readonly parentSessionId?: string; readonly parentRunId?: string; readonly depth?: number; readonly capabilityCeiling?: Partial<WorkerCapabilityCeiling> } = {}): Promise<WorkerBatchResult> {
     const runId = options.runId ?? createWorkerRunId(); const ownerId = options.ownerId ?? `owner-${randomUUID()}`; const parentSessionId = options.parentSessionId ?? ownerId;
     try {
-      const spawned = await this.spawnOwned(input, { ownerId, runId, parentSessionId, ...(options.parentRunId ? { parentRunId: options.parentRunId } : {}), depth: options.depth ?? 0 }, options.signal);
+      const spawned = await this.spawnOwned(input, { ownerId, runId, parentSessionId, ...(options.parentRunId ? { parentRunId: options.parentRunId } : {}), depth: options.depth ?? 0, ...(options.capabilityCeiling ? { requestedCeiling: options.capabilityCeiling } : {}) }, options.signal);
       const waited = await this.wait({ jobIds: spawned.jobs.map((entry) => entry.job.id), completion: "all", signal: options.signal });
       return Object.freeze({ ownerId, runId, parentSessionId, concurrency: spawned.concurrency, jobs: waited });
     } catch (error) {
@@ -498,7 +507,7 @@ export class WorkerBroker {
         const effectiveJob = status.updatedAt !== job.updatedAt || status.state !== job.state
           ? Object.freeze({ ...job, state: status.state, updatedAt: status.updatedAt, ...(status.startedAt ? { startedAt: status.startedAt } : {}), ...(status.completedAt ? { completedAt: status.completedAt, cleanupDeadline: new Date(Date.parse(status.completedAt) + (request.retentionMs ?? this.config.retentionMs)).toISOString() } : {}), ...(status.failure ? { failure: status.failure } : {}) })
           : job;
-        managed = { job: effectiveJob, status, paths, ownerId: effectiveJob.ownerId, lastMailboxError: mailboxError, retainedReason: typeof metadata.retainedReason === "string" ? metadata.retainedReason : undefined };
+        managed = { job: effectiveJob, status, paths, ownerId: effectiveJob.ownerId, ceiling: metadata.capabilityCeiling as WorkerCapabilityCeiling | undefined, lastMailboxError: mailboxError, retainedReason: typeof metadata.retainedReason === "string" ? metadata.retainedReason : undefined };
         if (effectiveJob.tmuxSession) managed.session = Object.freeze({ name: effectiveJob.tmuxSession, jobId: effectiveJob.id, ownerId: effectiveJob.ownerId });
         if (!isTerminalWorkerState(status.state)) {
           const started = Date.parse(status.startedAt ?? effectiveJob.startedAt ?? status.createdAt);

@@ -4,6 +4,7 @@ import * as Type from "typebox";
 import type { WorkerBatchResult, WorkerBroker, WorkerJobResult } from "./broker.ts";
 import { renderWorkerCall, renderWorkerResult, summarizeWorker, type WorkerToolDetails } from "./render.ts";
 import { WORKER_ADAPTERS, WORKER_STATES } from "./types.ts";
+import { parseInheritedWorkerContext } from "./capability-ceiling.ts";
 
 const AccessSchema = StringEnum(["read", "write"] as const);
 const AdapterSchema = StringEnum(WORKER_ADAPTERS);
@@ -64,7 +65,8 @@ function renderer(name: string) {
 
 export function registerWorkerTools(pi: ExtensionAPI | any, getBroker: () => WorkerBroker): void {
   const dispatch = (params: any, cwd: string) => ({ ...params, cwd });
-  const ownership = (toolCallId: string, ctx: any) => ({ ownerId: toolCallId, parentSessionId: ctx.sessionManager?.getSessionFile?.() ?? ctx.sessionManager?.getSessionId?.() ?? `ephemeral:${ctx.cwd}` });
+  const inherited = parseInheritedWorkerContext();
+  const ownership = (toolCallId: string, ctx: any) => ({ ownerId: toolCallId, parentSessionId: ctx.sessionManager?.getSessionFile?.() ?? ctx.sessionManager?.getSessionId?.() ?? `ephemeral:${ctx.cwd}`, depth: inherited.depth, ...(inherited.parentRunId ? { parentRunId: inherited.parentRunId } : {}), ...(inherited.ceiling ? { capabilityCeiling: inherited.ceiling } : {}) });
   pi.registerTool({
     name: "worker_run", label: "Chrysaki Worker Run", description: "Run one or more model tasks in sandboxed interactive tmux workers and wait for authoritative mailbox results. Output is bounded; full artifacts remain on disk.",
     promptSnippet: "Run delegated model work in interactive sandboxed tmux workers",

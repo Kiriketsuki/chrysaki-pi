@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { atomicWriteJson } from "./mailbox.ts";
-import type { WorkerConfig, WorkerState } from "./types.ts";
+import type { WorkerCapabilityCeiling, WorkerConfig, WorkerState } from "./types.ts";
 import { isTerminalWorkerState } from "./types.ts";
 
 interface AdmissionClaim {
@@ -80,7 +80,7 @@ export class WorkerAdmissionController {
     };
   }
 
-  async claimBatch(identities: readonly AdmissionIdentity[]): Promise<void> {
+  async claimBatch(identities: readonly AdmissionIdentity[], ceiling?: WorkerCapabilityCeiling): Promise<void> {
     if (!identities.length) throw new WorkerAdmissionError("Admission requires at least one worker");
     const { runId, sessionId } = identities[0];
     if (identities.some((identity) => identity.runId !== runId || identity.sessionId !== sessionId)) throw new WorkerAdmissionError("One batch must share run and session identity");
@@ -88,9 +88,12 @@ export class WorkerAdmissionController {
     await this.exclusive(async () => {
       await this.initialize();
       const counts = this.counts(sessionId, runId); const requested = identities.length;
-      if (counts.active + requested > this.config.maxActiveWorkers) throw new WorkerAdmissionError(`Worker active limit exceeded: ${counts.active} + ${requested} > ${this.config.maxActiveWorkers}`);
-      if (counts.run + requested > this.config.maxSpawnsPerRun) throw new WorkerAdmissionError(`Worker run spawn budget exceeded: ${counts.run} + ${requested} > ${this.config.maxSpawnsPerRun}`);
-      if (counts.session + requested > this.config.maxSpawnsPerSession) throw new WorkerAdmissionError(`Worker session spawn budget exceeded: ${counts.session} + ${requested} > ${this.config.maxSpawnsPerSession}`);
+      const activeLimit = Math.min(this.config.maxActiveWorkers, ceiling?.maxActiveWorkers ?? this.config.maxActiveWorkers);
+      const runLimit = Math.min(this.config.maxSpawnsPerRun, ceiling?.maxSpawnsPerRun ?? this.config.maxSpawnsPerRun);
+      const sessionLimit = Math.min(this.config.maxSpawnsPerSession, ceiling?.maxSpawnsPerSession ?? this.config.maxSpawnsPerSession);
+      if (counts.active + requested > activeLimit) throw new WorkerAdmissionError(`Worker active limit exceeded: ${counts.active} + ${requested} > ${activeLimit}`);
+      if (counts.run + requested > runLimit) throw new WorkerAdmissionError(`Worker run spawn budget exceeded: ${counts.run} + ${requested} > ${runLimit}`);
+      if (counts.session + requested > sessionLimit) throw new WorkerAdmissionError(`Worker session spawn budget exceeded: ${counts.session} + ${requested} > ${sessionLimit}`);
       const createdAt = new Date().toISOString();
       for (const identity of identities) {
         if (this.ledger.claims[identity.jobId]) throw new WorkerAdmissionError(`Worker admission already exists: ${identity.jobId}`);

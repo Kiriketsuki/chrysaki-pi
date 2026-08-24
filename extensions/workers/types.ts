@@ -212,12 +212,23 @@ export interface WorkerAdapterConfig {
   readonly recognizedResponses: Readonly<Record<string, string>>;
 }
 
+export interface WorkerCapabilityCeiling {
+  readonly allowedAdapters: readonly WorkerAdapterId[];
+  readonly maxAccess: WorkerAccessMode;
+  readonly allowedCapabilities: readonly string[];
+  readonly maxDepth: number;
+  readonly maxActiveWorkers: number;
+  readonly maxSpawnsPerRun: number;
+  readonly maxSpawnsPerSession: number;
+}
+
 export interface WorkerWorkflowConfig {
   readonly concurrency?: number;
   readonly timeoutMs?: number;
   readonly retentionMs?: number;
   readonly routingOrder?: readonly WorkerAdapterId[];
   readonly allowFallback?: boolean;
+  readonly capabilityCeiling?: Partial<WorkerCapabilityCeiling>;
 }
 
 export interface WorkerConfig {
@@ -234,6 +245,7 @@ export interface WorkerConfig {
   readonly maxSpawnsPerSession: number;
   readonly adapters: Readonly<Record<WorkerAdapterId, WorkerAdapterConfig>>;
   readonly workflows: Readonly<Record<string, WorkerWorkflowConfig>>;
+  readonly capabilityCeiling: WorkerCapabilityCeiling;
   readonly sandbox: {
     readonly requireBubblewrap: boolean;
     readonly allowCopiedNonGitWrites: boolean;

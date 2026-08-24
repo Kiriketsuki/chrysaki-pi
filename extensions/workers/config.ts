@@ -6,6 +6,7 @@ import { Check, Errors } from "typebox/value";
 import { atomicWriteJson } from "./mailbox.ts";
 import { WORKER_ADAPTERS, WORKER_SCHEMA_VERSION, type ResolvedWorkerPolicy, type WorkerAdapterConfig, type WorkerAdapterId, type WorkerConfig, type WorkerInvocationOverrides, type WorkerWorkflowConfig } from "./types.ts";
 import { WorkerValidationError } from "./jobs.ts";
+import { rootWorkerCapabilityCeiling } from "./capability-ceiling.ts";
 
 const AdapterIdSchema = Type.Union(WORKER_ADAPTERS.map((id) => Type.Literal(id)));
 const RoutingOrderSchema = Type.Array(AdapterIdSchema, { minItems: 1, maxItems: WORKER_ADAPTERS.length, uniqueItems: true });
@@ -13,6 +14,15 @@ const ConcurrencySchema = Type.Integer({ minimum: 1, maximum: 32 });
 const TimeoutSchema = Type.Integer({ minimum: 1_000, maximum: 86_400_000 });
 const RetentionSchema = Type.Integer({ minimum: 0, maximum: 604_800_000 });
 const StringMapSchema = Type.Record(Type.String(), Type.String());
+const CapabilityCeilingSchema = Type.Object({
+  allowedAdapters: Type.Optional(RoutingOrderSchema),
+  maxAccess: Type.Optional(Type.Union([Type.Literal("read"), Type.Literal("write")])),
+  allowedCapabilities: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true })),
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 64 })),
+  maxActiveWorkers: Type.Optional(Type.Integer({ minimum: 1, maximum: 256 })),
+  maxSpawnsPerRun: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000 })),
+  maxSpawnsPerSession: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+}, { additionalProperties: false });
 
 export const WorkerWorkflowConfigSchema = Type.Object({
   concurrency: Type.Optional(ConcurrencySchema),
@@ -20,6 +30,7 @@ export const WorkerWorkflowConfigSchema = Type.Object({
   retentionMs: Type.Optional(RetentionSchema),
   routingOrder: Type.Optional(RoutingOrderSchema),
   allowFallback: Type.Optional(Type.Boolean()),
+  capabilityCeiling: Type.Optional(CapabilityCeilingSchema),
 }, { additionalProperties: false });
 
 export const WorkerAdapterConfigSchema = Type.Object({
@@ -48,6 +59,7 @@ export const WorkerConfigFileSchema = Type.Object({
     codex: Type.Optional(WorkerAdapterConfigSchema),
   }, { additionalProperties: false })),
   workflows: Type.Optional(Type.Record(Type.String({ minLength: 1 }), WorkerWorkflowConfigSchema)),
+  capabilityCeiling: Type.Optional(CapabilityCeilingSchema),
   sandbox: Type.Optional(Type.Object({
     requireBubblewrap: Type.Optional(Type.Boolean()),
     allowCopiedNonGitWrites: Type.Optional(Type.Boolean()),
@@ -79,6 +91,7 @@ export const DEFAULT_WORKER_CONFIG: WorkerConfig = Object.freeze({
   maxSpawnsPerSession: 100,
   adapters: Object.freeze({ pi: DEFAULT_ADAPTER, claude: DEFAULT_ADAPTER, codex: DEFAULT_ADAPTER }),
   workflows: Object.freeze({}),
+  capabilityCeiling: Object.freeze({ allowedAdapters: Object.freeze(["pi", "claude", "codex"] as WorkerAdapterId[]), maxAccess: "write", allowedCapabilities: Object.freeze(["read", "write", "code", "tools", "reasoning", "images"]), maxDepth: 1, maxActiveWorkers: 32, maxSpawnsPerRun: 64, maxSpawnsPerSession: 100 }),
   sandbox: Object.freeze({ requireBubblewrap: true, allowCopiedNonGitWrites: false, authReadOnlyPaths: Object.freeze([]) }),
 });
 
@@ -102,7 +115,8 @@ export function validateWorkerConfig(input: unknown): WorkerConfig {
   const raw = input ?? {};
   assertValid(WorkerConfigFileSchema, raw, "worker configuration");
   const value = raw as any;
-  const workflows = Object.fromEntries(Object.entries(value.workflows ?? {}).map(([id, config]) => [id, Object.freeze({ ...(config as object), ...((config as any).routingOrder ? { routingOrder: Object.freeze([...(config as any).routingOrder]) } : {}) })]));
+  const workflows = Object.fromEntries(Object.entries(value.workflows ?? {}).map(([id, config]) => [id, Object.freeze({ ...(config as object), ...((config as any).routingOrder ? { routingOrder: Object.freeze([...(config as any).routingOrder]) } : {}), ...((config as any).capabilityCeiling ? { capabilityCeiling: Object.freeze({ ...(config as any).capabilityCeiling }) } : {}) })]));
+  const limitConfig = { routingOrder: value.routingOrder ?? DEFAULT_WORKER_CONFIG.routingOrder, maxActiveWorkers: value.maxActiveWorkers ?? DEFAULT_WORKER_CONFIG.maxActiveWorkers, maxSpawnsPerRun: value.maxSpawnsPerRun ?? DEFAULT_WORKER_CONFIG.maxSpawnsPerRun, maxSpawnsPerSession: value.maxSpawnsPerSession ?? DEFAULT_WORKER_CONFIG.maxSpawnsPerSession };
   return Object.freeze({
     schemaVersion: WORKER_SCHEMA_VERSION,
     routingOrder: Object.freeze([...(value.routingOrder ?? DEFAULT_WORKER_CONFIG.routingOrder)]),
@@ -117,6 +131,7 @@ export function validateWorkerConfig(input: unknown): WorkerConfig {
     maxSpawnsPerSession: value.maxSpawnsPerSession ?? DEFAULT_WORKER_CONFIG.maxSpawnsPerSession,
     adapters: Object.freeze({ pi: adapterConfig(value.adapters?.pi), claude: adapterConfig(value.adapters?.claude), codex: adapterConfig(value.adapters?.codex) }),
     workflows: Object.freeze(workflows),
+    capabilityCeiling: rootWorkerCapabilityCeiling(limitConfig, value.capabilityCeiling),
     sandbox: Object.freeze({
       requireBubblewrap: value.sandbox?.requireBubblewrap ?? true,
       allowCopiedNonGitWrites: value.sandbox?.allowCopiedNonGitWrites ?? false,

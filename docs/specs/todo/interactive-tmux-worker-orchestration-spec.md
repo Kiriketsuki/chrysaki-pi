@@ -371,11 +371,11 @@ Feature: Interactive Tmux Worker Orchestration
 | T10.1 | Add package install, /reload, session replacement, shutdown, and no-leaked-session lifecycle tests | High | T10 | pending |
 | T11 | Document configuration, preflight, routing, supervision, sandbox requirements, retained worktrees, troubleshooting, and rollback | Medium | T8-T10 | pending |
 | T12 | Run the full package check and verify the migration manifest covers every custom Pi workflow | High | T1-T11, T13-T16 | pending |
-| T13.0 | Fix interactive adapter executable-identity validation for resolved CLI symlinks so real Pi workers can launch without weakening provider checks | High | T5 | pending |
-| T13 | Add durable stable run/session/child identity and atomic admission control with per-session, per-run, and active-execution limits | High | T1, T6, T13.0 | pending |
-| T13.1 | Add all-or-nothing batch admission, release semantics, durable recovery, configuration, and budget exhaustion tests | High | T13 | pending |
-| T14 | Add monotonic capability ceilings for adapters, access, capabilities, nesting depth, and inherited limits | High | T1.2, T13 | pending |
-| T14.1 | Propagate effective ceilings into confined children and test that descendants can tighten but never widen them | High | T14 | pending |
+| T13.0 | Fix interactive adapter executable-identity validation for resolved CLI symlinks so real Pi workers can launch without weakening provider checks | High | T5 | done |
+| T13 | Add durable stable run/session/child identity and atomic admission control with per-session, per-run, and active-execution limits | High | T1, T6, T13.0 | done |
+| T13.1 | Add all-or-nothing batch admission, release semantics, durable recovery, configuration, and budget exhaustion tests | High | T13 | done |
+| T14 | Add monotonic capability ceilings for adapters, access, capabilities, nesting depth, and inherited limits | High | T1.2, T13 | done |
+| T14.1 | Propagate effective ceilings into confined children and test that descendants can tighten but never widen them | High | T14 | done |
 | T15 | Add canonical launch contracts, task digests, persisted routing evidence, side-effect-free broker preflight, `worker_preflight`, and `/worker doctor` | High | T4, T13, T14 | pending |
 | T15.1 | Add preflight/no-side-effect, deterministic-digest, routing-diagnostic, and legacy-record recovery tests | High | T15 | pending |
 | T16 | Add lifecycle process proof, exact ownership verification, completion batching, and recovery-safe notification delivery | High | T7, T13, T15 | pending |
