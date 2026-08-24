@@ -248,6 +248,7 @@ export interface WorkerConfig {
   readonly adapters: Readonly<Record<WorkerAdapterId, WorkerAdapterConfig>>;
   readonly workflows: Readonly<Record<string, WorkerWorkflowConfig>>;
   readonly capabilityCeiling: WorkerCapabilityCeiling;
+  readonly completionBatch: { readonly enabled: boolean; readonly debounceMs: number; readonly maxWaitMs: number };
   readonly sandbox: {
     readonly requireBubblewrap: boolean;
     readonly allowCopiedNonGitWrites: boolean;

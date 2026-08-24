@@ -47,6 +47,7 @@ export interface WorkerCleanupResult {
   readonly dirty: boolean;
   readonly reason?: string;
   readonly archivePath?: string;
+  readonly processTerminated?: boolean;
 }
 export interface WorkerReconcileResult { readonly recovered: number; readonly active: number; readonly terminal: number; readonly invalid: readonly string[]; readonly cleanup: readonly WorkerCleanupResult[]; }
 
@@ -84,6 +85,8 @@ interface ManagedJob {
   launchContract?: WorkerLaunchContract;
   routingAttempts?: readonly unknown[];
   retainedReason?: string;
+  processTerminalProof?: { readonly verifiedAt: string; readonly session?: string; readonly terminated: true };
+  lastNotifiedState?: WorkerState;
 }
 
 export class WorkerBrokerError extends Error {
@@ -124,6 +127,7 @@ export class WorkerBroker {
   private readonly now: () => number;
   private readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   private readonly onUpdate?: (update: WorkerUpdate) => void;
+  private readonly updateListeners = new Set<(update: WorkerUpdate) => void>();
   private readonly admission: WorkerAdmissionController;
   private readonly inheritedCeiling: WorkerCapabilityCeiling;
   private readonly jobs = new Map<string, ManagedJob>();
@@ -152,6 +156,8 @@ export class WorkerBroker {
       ...(managed.launchContract ? { launchContract: managed.launchContract } : {}),
       ...(managed.lastMailboxError ? { lastMailboxError: boundedText(managed.lastMailboxError, 8_192) } : {}),
       ...(managed.retainedReason ? { retainedReason: managed.retainedReason } : {}),
+      ...(managed.processTerminalProof ? { processTerminalProof: managed.processTerminalProof } : {}),
+      ...(managed.lastNotifiedState ? { lastNotifiedState: managed.lastNotifiedState } : {}),
     });
   }
 
@@ -185,7 +191,14 @@ export class WorkerBroker {
   }
 
   private emit(managed: ManagedJob): void {
-    this.onUpdate?.({ jobId: managed.job.id, state: managed.status.state, progress: managed.status.progress, elapsedMs: Math.max(0, this.now() - Date.parse(managed.status.createdAt)) });
+    const update = { jobId: managed.job.id, state: managed.status.state, progress: managed.status.progress, elapsedMs: Math.max(0, this.now() - Date.parse(managed.status.createdAt)) };
+    this.onUpdate?.(update); for (const listener of this.updateListeners) listener(update);
+  }
+
+  subscribeUpdates(listener: (update: WorkerUpdate) => void): () => void { this.updateListeners.add(listener); return () => this.updateListeners.delete(listener); }
+
+  async acknowledgeNotifications(jobIds: readonly string[]): Promise<void> {
+    await Promise.all(jobIds.map(async (id) => { const managed = this.jobs.get(id); if (!managed) return; managed.lastNotifiedState = managed.status.state; await this.persist(managed); }));
   }
 
   private async transition(managed: ManagedJob, state: WorkerState, options: { readonly progress?: string; readonly failure?: WorkerFailure } = {}): Promise<void> {
@@ -483,7 +496,13 @@ export class WorkerBroker {
         managed.retainedReason = reason; await this.persist(managed).catch(() => undefined);
         results.push(Object.freeze({ jobId: managed.job.id, cleaned: false, retained: true, dirty: false, reason })); continue;
       }
-      if (managed.job.tmuxSession) await this.tmux.kill(managed.job.tmuxSession).catch(() => false);
+      let processTerminated = true;
+      if (managed.job.tmuxSession) processTerminated = await this.tmux.terminateOwned(managed.job.tmuxSession, managed.job.id, managed.ownerId).catch(() => false);
+      if (!processTerminated) {
+        const reason = "Worker process ownership or terminal proof failed"; managed.retainedReason = reason; await this.persist(managed).catch(() => undefined);
+        results.push(Object.freeze({ jobId: managed.job.id, cleaned: false, retained: true, dirty: false, reason, archivePath, processTerminated: false })); continue;
+      }
+      managed.processTerminalProof = Object.freeze({ verifiedAt: new Date(this.now()).toISOString(), ...(managed.job.tmuxSession ? { session: managed.job.tmuxSession } : {}), terminated: true }); await this.persist(managed);
       if (managed.job.workspace) {
         try {
           const workspace = await this.workspaces.cleanup(managed.job.id);
@@ -491,7 +510,7 @@ export class WorkerBroker {
             managed.retainedReason = workspace.reason ?? "Workspace retained";
             managed.job = Object.freeze({ ...managed.job, workspace: Object.freeze({ ...managed.job.workspace, dirty: workspace.dirty, cleanupEligible: false }) });
             await this.persist(managed);
-            results.push(Object.freeze({ jobId: managed.job.id, cleaned: false, retained: true, dirty: workspace.dirty, reason: managed.retainedReason, archivePath })); continue;
+            results.push(Object.freeze({ jobId: managed.job.id, cleaned: false, retained: true, dirty: workspace.dirty, reason: managed.retainedReason, archivePath, processTerminated: true })); continue;
           }
         } catch (error) {
           const reason = `Workspace cleanup failed safely: ${error instanceof Error ? error.message : String(error)}`;
@@ -500,7 +519,7 @@ export class WorkerBroker {
         }
       }
       await rm(managed.paths.directory, { recursive: true, force: true }); this.jobs.delete(managed.job.id);
-      results.push(Object.freeze({ jobId: managed.job.id, cleaned: true, retained: false, dirty: false, archivePath }));
+      results.push(Object.freeze({ jobId: managed.job.id, cleaned: true, retained: false, dirty: false, archivePath, processTerminated: true }));
     }
     this.scheduleCleanup(); return Object.freeze(results);
   }
@@ -533,7 +552,7 @@ export class WorkerBroker {
         const effectiveJob = status.updatedAt !== job.updatedAt || status.state !== job.state
           ? Object.freeze({ ...job, state: status.state, updatedAt: status.updatedAt, ...(status.startedAt ? { startedAt: status.startedAt } : {}), ...(status.completedAt ? { completedAt: status.completedAt, cleanupDeadline: new Date(Date.parse(status.completedAt) + (request.retentionMs ?? this.config.retentionMs)).toISOString() } : {}), ...(status.failure ? { failure: status.failure } : {}) })
           : job;
-        managed = { job: effectiveJob, status, paths, ownerId: effectiveJob.ownerId, ceiling: metadata.capabilityCeiling as WorkerCapabilityCeiling | undefined, launchContract: metadata.launchContract as WorkerLaunchContract | undefined, lastMailboxError: mailboxError, retainedReason: typeof metadata.retainedReason === "string" ? metadata.retainedReason : undefined };
+        managed = { job: effectiveJob, status, paths, ownerId: effectiveJob.ownerId, ceiling: metadata.capabilityCeiling as WorkerCapabilityCeiling | undefined, launchContract: metadata.launchContract as WorkerLaunchContract | undefined, processTerminalProof: metadata.processTerminalProof as ManagedJob["processTerminalProof"], lastNotifiedState: typeof metadata.lastNotifiedState === "string" ? metadata.lastNotifiedState as WorkerState : undefined, lastMailboxError: mailboxError, retainedReason: typeof metadata.retainedReason === "string" ? metadata.retainedReason : undefined };
         if (effectiveJob.tmuxSession) managed.session = Object.freeze({ name: effectiveJob.tmuxSession, jobId: effectiveJob.id, ownerId: effectiveJob.ownerId });
         if (!isTerminalWorkerState(status.state)) {
           const started = Date.parse(status.startedAt ?? effectiveJob.startedAt ?? status.createdAt);
@@ -541,7 +560,8 @@ export class WorkerBroker {
         }
         this.jobs.set(entry.name, managed); recovered++; await this.persist(managed);
       } catch (error) { invalid.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`); continue; }
-      await this.refreshSerialized(managed);
+      const recoveredState = managed.status.state; await this.refreshSerialized(managed);
+      if (managed.status.state === recoveredState && ["blocked", "completed", "failed", "timed_out", "cancelled"].includes(managed.status.state) && managed.lastNotifiedState !== managed.status.state) this.emit(managed);
     }
     await this.admission.reconcile([...this.jobs.values()].map((entry) => ({ id: entry.job.id, state: entry.status.state })));
     const cleanup = await this.cleanup(undefined, { overdueOnly: true }); this.scheduleCleanup(); this.scheduleMonitor();

@@ -15,7 +15,9 @@ const sessionFromTarget = (target = "") => target.replace(/^=/, "").split(":")[0
 const fail = state.failCommand === command;
 let code = fail ? 9 : 0; let stdout = ""; let stderr = fail ? `forced ${command} failure` : "";
 
-if (!fail && command === "new-session") {
+if (!fail && command === "-V") {
+  stdout = "tmux 3.4\n";
+} else if (!fail && command === "new-session") {
   const name = valueAfter("-s"); const marker = args.indexOf("--");
   if (state.sessions[name]) { code = 1; stderr = "duplicate session"; }
   else state.sessions[name] = { cwd: valueAfter("-c"), argv: args.slice(marker + 1), options: {}, pastes: [], screen: "fake worker screen\n" };
@@ -23,6 +25,9 @@ if (!fail && command === "new-session") {
   const session = state.sessions[sessionFromTarget(valueAfter("-t"))];
   if (!session) { code = 1; stderr = "can't find session"; }
   else session.options[args.at(-2)] = args.at(-1);
+} else if (!fail && command === "show-options") {
+  const session = state.sessions[sessionFromTarget(valueAfter("-t"))]; const option = args.at(-1);
+  if (!session || !(option in session.options)) { code = 1; stderr = "missing session or option"; } else stdout = `${session.options[option]}\n`;
 } else if (!fail && command === "load-buffer") {
   state.buffers[valueAfter("-b")] = input;
 } else if (!fail && command === "paste-buffer") {

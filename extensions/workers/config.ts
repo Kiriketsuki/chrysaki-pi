@@ -60,6 +60,11 @@ export const WorkerConfigFileSchema = Type.Object({
   }, { additionalProperties: false })),
   workflows: Type.Optional(Type.Record(Type.String({ minLength: 1 }), WorkerWorkflowConfigSchema)),
   capabilityCeiling: Type.Optional(CapabilityCeilingSchema),
+  completionBatch: Type.Optional(Type.Object({
+    enabled: Type.Optional(Type.Boolean()),
+    debounceMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 60_000 })),
+    maxWaitMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 300_000 })),
+  }, { additionalProperties: false })),
   sandbox: Type.Optional(Type.Object({
     requireBubblewrap: Type.Optional(Type.Boolean()),
     allowCopiedNonGitWrites: Type.Optional(Type.Boolean()),
@@ -92,6 +97,7 @@ export const DEFAULT_WORKER_CONFIG: WorkerConfig = Object.freeze({
   adapters: Object.freeze({ pi: DEFAULT_ADAPTER, claude: DEFAULT_ADAPTER, codex: DEFAULT_ADAPTER }),
   workflows: Object.freeze({}),
   capabilityCeiling: Object.freeze({ allowedAdapters: Object.freeze(["pi", "claude", "codex"] as WorkerAdapterId[]), maxAccess: "write", allowedCapabilities: Object.freeze(["read", "write", "code", "tools", "reasoning", "images"]), maxDepth: 1, maxActiveWorkers: 32, maxSpawnsPerRun: 64, maxSpawnsPerSession: 100 }),
+  completionBatch: Object.freeze({ enabled: true, debounceMs: 150, maxWaitMs: 1_000 }),
   sandbox: Object.freeze({ requireBubblewrap: true, allowCopiedNonGitWrites: false, authReadOnlyPaths: Object.freeze([]) }),
 });
 
@@ -132,6 +138,7 @@ export function validateWorkerConfig(input: unknown): WorkerConfig {
     adapters: Object.freeze({ pi: adapterConfig(value.adapters?.pi), claude: adapterConfig(value.adapters?.claude), codex: adapterConfig(value.adapters?.codex) }),
     workflows: Object.freeze(workflows),
     capabilityCeiling: rootWorkerCapabilityCeiling(limitConfig, value.capabilityCeiling),
+    completionBatch: Object.freeze({ enabled: value.completionBatch?.enabled ?? true, debounceMs: value.completionBatch?.debounceMs ?? 150, maxWaitMs: value.completionBatch?.maxWaitMs ?? 1_000 }),
     sandbox: Object.freeze({
       requireBubblewrap: value.sandbox?.requireBubblewrap ?? true,
       allowCopiedNonGitWrites: value.sandbox?.allowCopiedNonGitWrites ?? false,

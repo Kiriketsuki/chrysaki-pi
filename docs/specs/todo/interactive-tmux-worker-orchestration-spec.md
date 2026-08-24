@@ -378,8 +378,8 @@ Feature: Interactive Tmux Worker Orchestration
 | T14.1 | Propagate effective ceilings into confined children and test that descendants can tighten but never widen them | High | T14 | done |
 | T15 | Add canonical launch contracts, task digests, persisted routing evidence, side-effect-free broker preflight, `worker_preflight`, and `/worker doctor` | High | T4, T13, T14 | done |
 | T15.1 | Add preflight/no-side-effect, deterministic-digest, routing-diagnostic, and legacy-record recovery tests | High | T15 | done |
-| T16 | Add lifecycle process proof, exact ownership verification, completion batching, and recovery-safe notification delivery | High | T7, T13, T15 | pending |
-| T16.1 | Add tests for capacity release versus retained sessions, failed cleanup proof, grouped success notifications, and immediate failure/blocked notifications | High | T16 | pending |
+| T16 | Add lifecycle process proof, exact ownership verification, completion batching, and recovery-safe notification delivery | High | T7, T13, T15 | done |
+| T16.1 | Add tests for capacity release versus retained sessions, failed cleanup proof, grouped success notifications, and immediate failure/blocked notifications | High | T16 | done |
 
 ---
 

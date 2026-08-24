@@ -34,6 +34,14 @@ test("detached launch passes worker command as argv without shell interpolation"
   fake.transport.dispose();
 });
 
+test("ownership proof verifies exact tmux metadata before termination", async () => {
+  const fake = await harness(); const jobId = createWorkerId(); const session = await fake.transport.launch({ jobId, ownerId: "owner", cwd: "/tmp", argv: ["pi"] });
+  assert.equal(await fake.transport.verifyOwnership(session.name, jobId, "owner"), true);
+  assert.equal(await fake.transport.verifyOwnership(session.name, jobId, "other"), false);
+  assert.equal(await fake.transport.terminateOwned(session.name, jobId, "other"), false); assert.equal(await fake.transport.hasSession(session.name), true);
+  assert.equal(await fake.transport.terminateOwned(session.name, jobId, "owner"), true); assert.equal(await fake.transport.hasSession(session.name), false);
+});
+
 test("private buffers deliver exact prompt content and are deleted", async () => {
   const fake = await harness(); const jobId = createWorkerId(); const session = await fake.transport.launch({ jobId, ownerId: "owner", cwd: "/tmp", argv: ["pi"] });
   const prompt = "line one\n'quoted' $HOME; echo nope";

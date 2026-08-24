@@ -109,6 +109,23 @@ export class TmuxTransport {
     return (await this.execute(["has-session", "-t", session], undefined, true)).code === 0;
   }
 
+  async verifyOwnership(session: string, jobId: string, ownerId: string): Promise<boolean> {
+    validateSessionName(session);
+    if (!JOB_ID_PATTERN.test(jobId) || !ownerId.trim()) return false;
+    if (!(await this.hasSession(session))) return true;
+    const [job, owner] = await Promise.all([
+      this.execute(["show-options", "-v", "-t", session, "@chrysaki-job-id"], undefined, true),
+      this.execute(["show-options", "-v", "-t", session, "@chrysaki-owner-id"], undefined, true),
+    ]);
+    return job.code === 0 && owner.code === 0 && job.stdout.trim() === jobId && owner.stdout.trim() === ownerId;
+  }
+
+  async terminateOwned(session: string, jobId: string, ownerId: string): Promise<boolean> {
+    if (!(await this.verifyOwnership(session, jobId, ownerId))) return false;
+    if (await this.hasSession(session)) await this.kill(session);
+    return !(await this.hasSession(session));
+  }
+
   async paste(session: string, text: string, submit = true): Promise<void> {
     validateSessionName(session);
     if (text.includes("\0")) throw new TmuxTransportError("Tmux paste content cannot contain NUL bytes");

@@ -11,7 +11,7 @@ import { WORKER_SCHEMA_VERSION, type WorkerAdapter, type WorkerJob, type WorkerS
 
 const delay = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
-async function harness(options: { readonly fakeClock?: boolean; readonly dirtyCleanup?: boolean; readonly config?: Record<string, unknown> } = {}) {
+async function harness(options: { readonly fakeClock?: boolean; readonly dirtyCleanup?: boolean; readonly ownershipFailure?: boolean; readonly config?: Record<string, unknown> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "chrysaki-broker-")); const source = join(root, "source"); const jobs = join(root, "jobs"); const executable = join(root, "runtime", "pi");
   await import("node:fs/promises").then(({ mkdir }) => Promise.all([mkdir(source), mkdir(join(root, "runtime"))]));
   await writeFile(join(root, "runtime", "package.json"), "{}"); await writeFile(executable, "#!/bin/sh\nexit 0\n"); await chmod(executable, 0o755);
@@ -51,7 +51,7 @@ async function harness(options: { readonly fakeClock?: boolean; readonly dirtyCl
     async launch(request: any) { const name = `chrysaki-${request.jobId}`; sessions.add(name); return { name, jobId: request.jobId, ownerId: request.ownerId }; },
     async hasSession(name: string) { return sessions.has(name); }, async capturePane() { return "ready"; },
     async paste(session: string, text: string) { prompts.push({ session, text }); }, async interrupt() {},
-    async archivePane() { return "diagnostic"; }, async kill(name: string) { return sessions.delete(name); },
+    async archivePane() { return "diagnostic"; }, async verifyOwnership(name: string, jobId: string, ownerId: string) { return sessions.has(name) && name === `chrysaki-${jobId}` && Boolean(ownerId); }, async terminateOwned(name: string, jobId: string, ownerId: string) { if (options.ownershipFailure || !(await this.verifyOwnership(name, jobId, ownerId))) return false; sessions.delete(name); return true; }, async kill(name: string) { return sessions.delete(name); },
     async reveal(name: string, parent?: string) { return { mode: parent ? "split" : "attach-command", argv: ["tmux", "attach-session", "-t", name], command: `'tmux' 'attach-session' '-t' '${name}'` }; },
   };
   const config = validateWorkerConfig({ concurrency: 1, timeoutMs: 2_000, retentionMs: 10_000, workflows: { wave: { concurrency: 1 } }, ...(options.config ?? {}) });
@@ -199,6 +199,13 @@ test("recovered live workers continue mailbox monitoring after parent replacemen
   assert.equal(metadata.job.state, "completed"); assert.equal((await replacement.status([entry.job.id]))[0].result, "monitored result"); replacement.dispose();
 });
 
+test("recovery replays unacknowledged terminal notifications exactly until delivery is persisted", async () => {
+  const item = await harness(); const spawned = await item.broker.spawn({ task: "notify", access: "read", cwd: item.source }); const entry = spawned.jobs[0]; item.broker.dispose(); await complete(entry.job, entry.status, "done");
+  const replacement = item.restart(); const replayed: any[] = []; replacement.subscribeUpdates((update) => replayed.push(update)); await replacement.reconcile();
+  assert.equal(replayed.filter((update) => update.state === "completed").length, 1); await replacement.acknowledgeNotifications([entry.job.id]); replacement.dispose();
+  const final = item.restart(); const duplicates: any[] = []; final.subscribeUpdates((update) => duplicates.push(update)); await final.reconcile(); assert.equal(duplicates.filter((update) => update.state === "completed").length, 0); final.dispose();
+});
+
 test("crash recovery discovers an authoritative completion written while parent was absent", async () => {
   const item = await harness(); const spawned = await item.broker.spawn({ task: "finish after crash", access: "read", cwd: item.source }); const entry = spawned.jobs[0];
   item.broker.dispose(); await complete(entry.job, entry.status, "recovered result");
@@ -225,11 +232,19 @@ test("grace cleanup archives diagnostics and removes only overdue clean resource
   item.broker.dispose();
 });
 
+test("cleanup retains every resource when exact process ownership cannot be proven", async () => {
+  const item = await harness({ fakeClock: true, ownershipFailure: true }); const spawned = await item.broker.spawn({ task: "proof", access: "read", cwd: item.source, retentionMs: 0 }); const entry = spawned.jobs[0];
+  await complete(entry.job, entry.status, "done"); await item.broker.status([entry.job.id]); item.advance(100);
+  const [retained] = await item.broker.cleanup(undefined, { overdueOnly: true });
+  assert.equal(retained.retained, true); assert.equal(retained.processTerminated, false); assert.equal(item.sessions.size, 1); assert.equal(item.cleanedWorkspaces.length, 0); assert.match(retained.reason ?? "", /proof failed/);
+  item.broker.dispose();
+});
+
 test("overdue dirty worktrees retire tmux but retain mailbox and workspace ownership", async () => {
   const item = await harness({ fakeClock: true, dirtyCleanup: true }); const spawned = await item.broker.spawn({ task: "dirty", access: "read", cwd: item.source, retentionMs: 0 }); const entry = spawned.jobs[0];
   await complete(entry.job, entry.status, "changes retained"); await item.broker.status([entry.job.id]); item.advance(100);
   const [retained] = await item.broker.cleanup(undefined, { overdueOnly: true });
-  assert.equal(retained.retained, true); assert.equal(retained.dirty, true); assert.equal(item.sessions.size, 0);
+  assert.equal(retained.retained, true); assert.equal(retained.dirty, true); assert.equal(retained.processTerminated, true); assert.equal(item.sessions.size, 0);
   assert.equal((await item.broker.status([entry.job.id]))[0].job.workspace?.dirty, true);
   assert.equal(JSON.parse(await readFile(workerMailboxPaths(item.jobs, entry.job.id).metadata, "utf8")).retainedReason, "Workspace contains unintegrated changes");
   item.broker.dispose();

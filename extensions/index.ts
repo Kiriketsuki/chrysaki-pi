@@ -24,6 +24,7 @@ import type { WorkerBroker } from "./workers/broker.ts";
 import { summarizeWorker } from "./workers/render.ts";
 import { createChrysakiWorkerRuntime, type ChrysakiWorkerRuntime } from "./workers/runtime.ts";
 import { registerWorkerTools } from "./workers/tools.ts";
+import { WorkerCompletionBatcher } from "./workers/completion-batcher.ts";
 
 interface Runtime {
   ctx: ExtensionContext | any;
@@ -207,6 +208,12 @@ export default async function chrysakiPi(pi: ExtensionAPI, options: ChrysakiExte
     active.scheduler = scheduler; runtime = active;
     try {
       const workers = disposal.add(await (options.createWorkerRuntime ?? createChrysakiWorkerRuntime)()); active.workers = workers;
+      const completionBatcher = disposal.add(new WorkerCompletionBatcher(workers.config?.completionBatch ?? { enabled: true, debounceMs: 150, maxWaitMs: 1_000 }, async (notices) => {
+        const failures = notices.filter((notice) => notice.state !== "completed");
+        const text = notices.length === 1 ? `Worker ${notices[0].jobId}: ${notices[0].state}` : `${notices.length} workers completed`;
+        ctx.ui.notify(text, failures.length ? "warning" : "info"); await workers.broker.acknowledgeNotifications?.(notices.map((notice) => notice.jobId));
+      }));
+      if (workers.broker.subscribeUpdates) disposal.add(workers.broker.subscribeUpdates((update) => completionBatcher.push(update)));
       const recovery = await workers.start();
       if (recovery.invalid.length) ctx.ui.notify(`Worker recovery retained ${recovery.invalid.length} invalid mailbox${recovery.invalid.length === 1 ? "" : "es"} for inspection`, "warning");
     } catch (error) {

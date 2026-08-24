@@ -23,6 +23,7 @@ export class ChrysakiWorkerRuntime {
     private readonly tmux: TmuxTransport,
     private readonly sandbox: SandboxManager,
     private readonly workspaces: WorkspaceManager,
+    readonly config: WorkerConfig,
   ) { this.broker = broker; }
 
   async start() { return this.broker.reconcile(); }
@@ -47,5 +48,5 @@ export async function createChrysakiWorkerRuntime(options: ChrysakiWorkerRuntime
   const router = new WorkerRouter({ config, adapters, sandbox });
   const inherited = parseInheritedWorkerContext();
   const broker = new WorkerBroker({ config, router, workspaces, sandbox, tmux, jobsRoot: join(agentDirectory, "workers", "jobs"), archiveRoot: join(agentDirectory, "workers", "archive"), inheritedCeiling: inherited.ceiling });
-  return new ChrysakiWorkerRuntime(broker, tmux, sandbox, workspaces);
+  return new ChrysakiWorkerRuntime(broker, tmux, sandbox, workspaces, config);
 }
