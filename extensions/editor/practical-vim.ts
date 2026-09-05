@@ -1,6 +1,6 @@
-import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
+import { matchesKey, truncateToWidth, visibleWidth, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
+import { ChrysakiEditor } from "./chrysaki-editor.ts";
 import { VimEngine } from "./vim-core.ts";
 
 function cursorOffset(text: string, cursor: { line: number; col: number }): number {
@@ -17,7 +17,7 @@ function keyName(data: string): string | undefined {
   return undefined;
 }
 
-export class PracticalVimEditor extends CustomEditor {
+export class PracticalVimEditor extends ChrysakiEditor {
   readonly vim: VimEngine;
   private selection?: readonly [number, number];
 

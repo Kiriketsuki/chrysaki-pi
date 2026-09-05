@@ -26,8 +26,14 @@ export class RailComponent {
   focused = false;
   private cache = new Map<string, string[]>();
   private unsubscribe: () => void;
-  readonly layout: RailLayout = { offsetX: 0, offsetY: 0, width: 30, height: 72 };
-  constructor(private store: StateStore<UiSnapshot>, private theme: Theme, private tui: TUI, private releaseFocus: () => void) {
+  constructor(
+    private store: StateStore<UiSnapshot>,
+    private theme: Theme,
+    private tui: TUI,
+    readonly layout: RailLayout,
+    private releaseFocus: () => void,
+    private relayout: () => void,
+  ) {
     this.unsubscribe = store.subscribe((state) => state, () => { this.invalidate(); this.tui.requestRender(); });
   }
   handleInput(data: string): void {
@@ -44,7 +50,10 @@ export class RailComponent {
       if (matchesKey(data, "alt+up")) this.layout.offsetY -= 1;
       if (matchesKey(data, "alt+down")) this.layout.offsetY += 1;
     } else return;
-    this.invalidate(); this.tui.requestRender();
+    this.invalidate();
+    // Pi resolves dynamic overlay options only when an overlay is mounted.
+    // Remount it so changed offsets and dimensions become real geometry.
+    this.relayout();
   }
   render(width: number): string[] {
     const cacheKey = `${width}:${this.focused}`;
@@ -52,7 +61,12 @@ export class RailComponent {
     const state = this.store.get();
     const module = state.rail.promoted ?? state.rail.modules[0] ?? "context";
     let lines: string[];
-    if (module === "git") lines = renderGitModule(state.git, width, this.tui.terminal.rows, this.theme, this.focused);
+    if (module === "git") {
+      // Match Pi's percentage maxHeight calculation so the bottom border is
+      // rendered inside the overlay instead of being clipped off afterward.
+      const panelHeight = Math.max(3, Math.min(this.tui.terminal.rows - 2, Math.floor(this.tui.terminal.rows * this.layout.height / 100)));
+      lines = renderGitModule(state.git, width, panelHeight, this.theme, this.focused);
+    }
     else if (module === "context") lines = doubleBox([
       ` ${this.theme.fg("accent", `${state.contextPercent.toFixed(0)}%`)} context`,
       ` ${formatCount(state.contextTokens)} / ${formatCount(state.contextWindow)} tokens`,
@@ -70,12 +84,28 @@ export class RailComponent {
 export class SidebarAdapter {
   private handle?: OverlayHandle;
   private close?: () => void;
+  private remount?: () => void;
   private disposed = false;
-  show(handle: OverlayHandle, close: () => void): void { if (this.disposed) { handle.hide(); return; } this.handle?.hide(); this.handle = handle; this.close = close; handle.setHidden(false); }
+  private wantsFocus = false;
+  readonly layout: RailLayout = { offsetX: 0, offsetY: 0, width: 30, height: 72 };
+  show(handle: OverlayHandle, close: () => void, remount: () => void): void {
+    if (this.disposed) { handle.hide(); return; }
+    this.handle?.hide(); this.handle = handle; this.close = close; this.remount = remount;
+    handle.setHidden(false);
+    if (this.wantsFocus) handle.focus(); else handle.unfocus();
+  }
   hide(): void { this.handle?.setHidden(true); }
   pin(): void { this.handle?.setHidden(false); }
   promote(): void { this.handle?.setHidden(false); }
-  focus(): void { this.handle?.setHidden(false); this.handle?.focus(); }
-  unfocus(): void { this.handle?.unfocus(); }
-  dispose(): void { if (this.disposed) return; this.disposed = true; this.handle?.hide(); this.close?.(); this.handle = undefined; this.close = undefined; }
+  focus(): void { this.wantsFocus = true; this.handle?.setHidden(false); this.handle?.focus(); }
+  unfocus(): void { this.wantsFocus = false; this.handle?.unfocus(); }
+  collapse(): void { this.wantsFocus = false; this.handle?.unfocus(); this.handle?.setHidden(true); }
+  isFocused(): boolean { return this.handle?.isFocused() ?? false; }
+  isVisible(): boolean { return this.handle ? !this.handle.isHidden() : false; }
+  relayout(): void { this.remount?.(); }
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true; this.handle?.hide(); this.close?.();
+    this.handle = undefined; this.close = undefined; this.remount = undefined;
+  }
 }

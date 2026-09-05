@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { GitSnapshot } from "../runtime/types.ts";
-import { doubleBox, fit } from "./layout.ts";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { fit } from "./layout.ts";
 
 const statusColor = (theme: Theme, code: string, text: string): string => {
   if (code === "A" || code === "?") return theme.fg("success", text);
@@ -9,12 +10,25 @@ const statusColor = (theme: Theme, code: string, text: string): string => {
   return theme.fg("muted", text);
 };
 
+function gitPanel(lines: readonly string[], width: number, title: string, theme: Theme, focused: boolean): string[] {
+  if (width <= 1) return lines.map((line) => fit(line, width));
+  const inner = width - 2;
+  const border = (text: string) => theme.fg(focused ? "borderAccent" : "borderMuted", text);
+  const heading = fit(` ⬢ ${title} `, inner);
+  const paint = (line: string) => typeof (theme as any).bg === "function" ? (theme as any).bg("toolPendingBg", line) : line;
+  const top = `${border("┌")}${border(heading)}${border("─".repeat(Math.max(0, inner - visibleWidth(heading))))}${border("┐")}`;
+  const body = lines.map((line) => {
+    const fitted = fit(line, inner);
+    return `${border("│")}${fitted}${" ".repeat(Math.max(0, inner - visibleWidth(fitted)))}${border("│")}`;
+  });
+  return [paint(top), ...body.map(paint), paint(`${border("└")}${border("─".repeat(inner))}${border("┘")}`)];
+}
+
 export function renderGitModule(snapshot: GitSnapshot, width: number, height = 20, theme?: Theme, focused = false): string[] {
   const color = theme ?? ({ fg: (_role: string, text: string) => text, bg: (_role: string, text: string) => text, bold: (text: string) => text } as Theme);
   if (!snapshot.available) {
     const bodyHeight = Math.max(1, height - 2);
-    const panel = doubleBox([color.fg("muted", " Git unavailable"), ...Array.from({ length: bodyHeight - 1 }, () => "")], width, "GIT");
-    return typeof (color as any).bg === "function" ? panel.map((line) => (color as any).bg("toolPendingBg", line)) : panel;
+    return gitPanel([color.fg("muted", " Git unavailable"), ...Array.from({ length: bodyHeight - 1 }, () => "")], width, "GIT", color, focused);
   }
   const lines: string[] = [];
   const branch = snapshot.branch ?? "HEAD";
@@ -41,7 +55,5 @@ export function renderGitModule(snapshot: GitSnapshot, width: number, height = 2
   while (lines.length < bodyHeight) lines.push("");
   // Overlays composite over the transcript. Paint every cell so the rail is
   // an opaque panel rather than transparent text drawn on top of Pi.
-  let panel = doubleBox(lines.slice(0, bodyHeight), width, focused ? `◆ GIT · ${branch} · FOCUSED` : `GIT · ${branch}`);
-  if (focused) panel = panel.map((line) => color.fg("borderAccent", line));
-  return typeof (color as any).bg === "function" ? panel.map((line) => (color as any).bg("toolPendingBg", line)) : panel;
+  return gitPanel(lines.slice(0, bodyHeight), width, focused ? `GIT · ${branch} · FOCUSED` : `GIT · ${branch}`, color, focused);
 }
