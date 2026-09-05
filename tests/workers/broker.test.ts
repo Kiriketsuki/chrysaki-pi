@@ -232,6 +232,20 @@ test("grace cleanup archives diagnostics and removes only overdue clean resource
   item.broker.dispose();
 });
 
+test("cleanup is serialized across replacement brokers sharing a mailbox root", async () => {
+  const item = await harness({ fakeClock: true }); const spawned = await item.broker.spawn({ task: "shared cleanup", access: "read", cwd: item.source, retentionMs: 5_000 }); const entry = spawned.jobs[0];
+  await complete(entry.job, entry.status, "done"); await item.broker.status([entry.job.id]);
+  const replacement = item.restart(); await replacement.reconcile(); item.advance(6_000);
+  const outcomes = (await Promise.all([
+    item.broker.cleanup([entry.job.id], { overdueOnly: true }),
+    replacement.cleanup([entry.job.id], { overdueOnly: true }),
+  ])).flat();
+  assert.equal(outcomes.length, 2); assert.ok(outcomes.every((outcome) => outcome.cleaned && !outcome.retained));
+  assert.equal(outcomes.filter((outcome) => outcome.reason?.includes("another broker")).length, 1);
+  assert.deepEqual(item.cleanedWorkspaces, [entry.job.id]);
+  item.broker.dispose(); replacement.dispose();
+});
+
 test("cleanup retains every resource when exact process ownership cannot be proven", async () => {
   const item = await harness({ fakeClock: true, ownershipFailure: true }); const spawned = await item.broker.spawn({ task: "proof", access: "read", cwd: item.source, retentionMs: 0 }); const entry = spawned.jobs[0];
   await complete(entry.job, entry.status, "done"); await item.broker.status([entry.job.id]); item.advance(100);

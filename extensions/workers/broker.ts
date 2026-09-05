@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
+import { access, cp, mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import { WorkerAdmissionController, defaultAdmissionPath } from "./admission.ts";
 import { WORKER_CEILING_ENV, WORKER_DEPTH_ENV, WORKER_PARENT_RUN_ENV, assertWorkerRequestWithinCeiling, filterRoutingByCeiling, serializeWorkerCapabilityCeiling, tightenWorkerCapabilityCeiling } from "./capability-ceiling.ts";
 import { createWorkerLaunchContract, taskDigest, type WorkerLaunchContract, type WorkerPreflightResult } from "./contracts.ts";
@@ -106,6 +106,12 @@ function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void>
 function boundedText(value: string, maxCharacters = 4_096): string { return value.length <= maxCharacters ? value : `${value.slice(0, maxCharacters - 14)}… [truncated]`; }
 function failure(code: string, message: string, retryable = false): WorkerFailure { return { code, message: boundedText(message, 8_192), retryable }; }
 
+const CLEANUP_CHAINS_KEY = Symbol.for("chrysaki.workers.cleanupChains");
+const cleanupChains = (() => {
+  const shared = globalThis as typeof globalThis & { [CLEANUP_CHAINS_KEY]?: Map<string, Promise<void>> };
+  return shared[CLEANUP_CHAINS_KEY] ??= new Map<string, Promise<void>>();
+})();
+
 async function executableRuntimeRoot(executablePath: string): Promise<string> {
   const target = await realpath(executablePath); let current = dirname(target); const filesystemRoot = parse(current).root;
   while (current !== filesystemRoot) {
@@ -136,7 +142,6 @@ export class WorkerBroker {
   private monitoring = false;
   private disposed = false;
   private reconcilePromise?: Promise<WorkerReconcileResult>;
-  private cleanupChain: Promise<void> = Promise.resolve();
 
   constructor(options: WorkerBrokerOptions) {
     this.config = options.config; this.router = options.router; this.workspaces = options.workspaces; this.sandbox = options.sandbox; this.tmux = options.tmux;
@@ -186,7 +191,14 @@ export class WorkerBroker {
     const deadlines = [...this.jobs.values()].map((job) => this.terminalDeadline(job)).filter((value): value is number => value !== undefined);
     if (!deadlines.length) return;
     const delay = Math.max(0, Math.min(...deadlines) - this.now());
-    this.cleanupTimer = setTimeout(() => { this.cleanupTimer = undefined; void this.cleanup(undefined, { overdueOnly: true }).finally(() => this.scheduleCleanup()); }, Math.min(delay, 2_147_483_647));
+    this.cleanupTimer = setTimeout(() => {
+      this.cleanupTimer = undefined;
+      void this.cleanup(undefined, { overdueOnly: true }).then(() => this.scheduleCleanup()).catch(() => {
+        if (this.disposed) return;
+        this.cleanupTimer = setTimeout(() => { this.cleanupTimer = undefined; this.scheduleCleanup(); }, Math.max(this.pollIntervalMs, 250));
+        this.cleanupTimer.unref?.();
+      });
+    }, Math.min(delay, 2_147_483_647));
     this.cleanupTimer.unref?.();
   }
 
@@ -470,10 +482,16 @@ export class WorkerBroker {
   }
 
   async cleanup(jobIds?: readonly string[], options: { readonly overdueOnly?: boolean } = {}): Promise<readonly WorkerCleanupResult[]> {
-    let release!: () => void; const predecessor = this.cleanupChain;
-    this.cleanupChain = new Promise<void>((resolveCleanup) => { release = resolveCleanup; });
+    let release!: () => void;
+    const predecessor = cleanupChains.get(this.root) ?? Promise.resolve();
+    const current = new Promise<void>((resolveCleanup) => { release = resolveCleanup; });
+    cleanupChains.set(this.root, current);
     await predecessor;
-    try { return await this.cleanupOnce(jobIds, options); } finally { release(); }
+    try { return await this.cleanupOnce(jobIds, options); }
+    finally {
+      release();
+      if (cleanupChains.get(this.root) === current) cleanupChains.delete(this.root);
+    }
   }
 
   private async cleanupOnce(jobIds?: readonly string[], options: { readonly overdueOnly?: boolean } = {}): Promise<readonly WorkerCleanupResult[]> {
@@ -483,6 +501,13 @@ export class WorkerBroker {
       : [...this.jobs.values()];
     const results: WorkerCleanupResult[] = [];
     for (const managed of targets) {
+      try { await access(managed.paths.directory); }
+      catch (error: any) {
+        if (error?.code !== "ENOENT") throw error;
+        this.jobs.delete(managed.job.id);
+        results.push(Object.freeze({ jobId: managed.job.id, cleaned: true, retained: false, dirty: false, reason: "Mailbox was already removed by another broker" }));
+        continue;
+      }
       if (!isTerminalWorkerState(managed.status.state)) {
         if (!options.overdueOnly) results.push(Object.freeze({ jobId: managed.job.id, cleaned: false, retained: true, dirty: false, reason: `Worker is ${managed.status.state}` }));
         continue;
