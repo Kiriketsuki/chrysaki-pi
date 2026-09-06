@@ -101,7 +101,10 @@ function terminalStatus(previous: WorkerStatus, state: "completed" | "failed", d
 export function installPiMailboxExtension(pi: ExtensionAPI, environment: PiMailboxEnvironment = process.env): void {
   const jobId = environment.CHRYSAKI_WORKER_JOB_ID; const mailbox = environment.CHRYSAKI_MAILBOX;
   if (!jobId || !mailbox || !isAbsolute(mailbox)) throw new Error("Pi mailbox extension requires an absolute CHRYSAKI_MAILBOX and CHRYSAKI_WORKER_JOB_ID");
-  if (!JOB_ID_PATTERN.test(jobId) || resolve(mailbox).split("/").at(-1) !== jobId) throw new Error("Pi mailbox extension job ID does not match its mailbox path");
+  if (!JOB_ID_PATTERN.test(jobId)) throw new Error("Pi mailbox extension requires a valid worker job ID");
+  // The host job directory is deliberately mounted at the fixed guest path
+  // /mailbox, so its guest basename cannot equal the host-side job ID. The
+  // authoritative status file below binds and validates that identity.
   const statusPath = resolve(mailbox, "status.json"); const resultPath = resolve(mailbox, "result.md");
   let terminalWritten = false;
 

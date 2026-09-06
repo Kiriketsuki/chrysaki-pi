@@ -7,7 +7,7 @@ A responsive Chrysaki Precision interface suite for [Pi](https://github.com/eare
 ## Install
 
 ```bash
-pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.2.10
+pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.2.11
 ```
 
 Select `chrysaki` in `/settings` or set:

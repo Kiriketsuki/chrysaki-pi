@@ -1,0 +1,9 @@
+pi v0.85.1
+escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+Press ctrl+o to show full startup help and loaded resources.
+
+────────────────────────────────────────────────────────────────────────────────
+ 
+────────────────────────────────────────────────────────────────────────────────
+/workspace (main)
+$0.000 (sub) 0.0%/1.0M (auto)               (anthropic) claude-opus-4-8 • medium

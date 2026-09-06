@@ -80,6 +80,10 @@ for (const provider of ["pi", "claude", "codex"] as const) test(`${provider} fix
   const unknown = adapter.recognizeScreen("Continue with unknown action? [y/n]"); assert.equal(unknown.state, "blocked"); assert.equal(unknown.promptId, undefined); assert.equal(adapter.answerPrompt(unknown, { confinementActive: true }), undefined);
 });
 
+test("Pi recognizes the modern full-screen editor as ready", async () => {
+  assert.equal(new PiWorkerAdapter().recognizeScreen(await screen("pi", "ready-modern")).state, "ready");
+});
+
 test("recognized prompt responses are configurable and interrupts delegate to tmux transport", async () => {
   const calls: string[] = []; const adapter = new ClaudeWorkerAdapter({ recognizedResponses: { "workspace-trust": "custom-response" }, interrupt: async (session) => { calls.push(session); } });
   const blocked = adapter.recognizeScreen(await screen("claude", "blocked")); assert.equal(adapter.answerPrompt(blocked, { confinementActive: true }), "custom-response");

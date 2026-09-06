@@ -11,7 +11,10 @@ const DEFINITION: AdapterDefinition = Object.freeze({
   environmentKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"],
   credentialBindings: (home: string) => [{ hostPath: join(home, ".pi", "agent", "auth.json"), guestPath: "/home/worker/.pi/agent/auth.json" }],
   capabilities: Object.freeze(["read", "write", "code", "tools", "reasoning", "images"]),
-  readyPatterns: Object.freeze([/(?:^|\n)\s*[>❯]\s*$/m]),
+  readyPatterns: Object.freeze([
+    /(?:^|\n)\s*[>❯]\s*$/m,
+    /(?:^|\n)[─━-]{20,}\n\s*\/workspace(?:[/(\s]|$)/m,
+  ]),
   runningPatterns: Object.freeze([/esc to interrupt/i, /working|thinking/i]),
   blockedPatterns: Object.freeze([
     { id: "project-trust", pattern: /Trust project folder\?/i, response: "y" },

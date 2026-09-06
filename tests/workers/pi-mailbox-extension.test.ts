@@ -52,7 +52,8 @@ test("Pi worker completion records strict failure when no complete assistant res
 test("Pi mailbox helper refuses unconfined trust and mismatched mailbox identity", async () => {
   const item = await mailbox(); const harness = extensionHarness({ CHRYSAKI_WORKER_JOB_ID: item.jobId, CHRYSAKI_MAILBOX: item.paths.directory, CHRYSAKI_CONFINED: "0" });
   assert.deepEqual(await harness.handlers.get("project_trust")![0]({ cwd: "/workspace" }, {}), { trusted: "undecided" });
-  assert.throws(() => extensionHarness({ CHRYSAKI_WORKER_JOB_ID: createWorkerId(), CHRYSAKI_MAILBOX: item.paths.directory, CHRYSAKI_CONFINED: "1" }), /does not match/);
+  const mismatch = extensionHarness({ CHRYSAKI_WORKER_JOB_ID: createWorkerId(), CHRYSAKI_MAILBOX: item.paths.directory, CHRYSAKI_CONFINED: "1" });
+  await assert.rejects(() => mismatch.handlers.get("agent_settled")![0]({}, context()), /invalid worker status/);
   assert.throws(() => extensionHarness({ CHRYSAKI_WORKER_JOB_ID: item.jobId, CHRYSAKI_MAILBOX: "relative" }), /absolute/);
 });
 
