@@ -1,7 +1,14 @@
-import { dirname, isAbsolute, relative, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isTerminalWorkerState, type WorkerStatusFile } from "./types.ts";
-import { readWorkerStatus, workerMailboxPaths, writeCompletedResult, writeWorkerStatus } from "./mailbox.ts";
+import { randomUUID } from "node:crypto";
+import { chmod, open, readFile, rename, rm } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
+
+interface ExtensionAPI {
+  on(event: string, handler: (event: any, context: any) => unknown): void;
+}
+
+interface ExtensionContext {
+  readonly sessionManager: { getBranch(): readonly any[] };
+}
 
 export interface PiMailboxEnvironment {
   readonly CHRYSAKI_WORKER_JOB_ID?: string;
@@ -10,6 +17,21 @@ export interface PiMailboxEnvironment {
 }
 
 interface AssistantResult { readonly text?: string; readonly stopReason?: string; readonly error?: string; }
+interface WorkerStatus {
+  readonly schemaVersion: number;
+  readonly jobId: string;
+  readonly state: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly startedAt?: string;
+  readonly completedAt?: string;
+  readonly resultPath?: string;
+  readonly progress?: string;
+  readonly failure?: { readonly code: string; readonly message: string; readonly retryable: boolean };
+}
+
+const JOB_ID_PATTERN = /^wrk_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TERMINAL_STATES = new Set(["completed", "failed", "timed_out", "cancelled"]);
 
 export function extractFinalAssistant(ctx: Pick<ExtensionContext, "sessionManager">): AssistantResult {
   const branch = ctx.sessionManager.getBranch();
@@ -30,7 +52,36 @@ function workspaceContains(cwd: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-function terminalStatus(previous: WorkerStatusFile, state: "completed" | "failed", details: { readonly message?: string } = {}): WorkerStatusFile {
+function validateStatus(input: unknown, jobId: string): WorkerStatus {
+  const value = input as Partial<WorkerStatus> | null;
+  if (!value || typeof value !== "object" || value.jobId !== jobId || typeof value.schemaVersion !== "number" || typeof value.state !== "string" || typeof value.createdAt !== "string" || typeof value.updatedAt !== "string") {
+    throw new Error("Pi mailbox contains an invalid worker status");
+  }
+  return value as WorkerStatus;
+}
+
+async function readStatus(path: string, jobId: string): Promise<WorkerStatus> {
+  return validateStatus(JSON.parse(await readFile(path, "utf8")), jobId);
+}
+
+async function atomicWrite(path: string, content: string, mode: number): Promise<void> {
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  let handle;
+  try {
+    handle = await open(temporary, "wx", mode);
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+    await handle.close(); handle = undefined;
+    await chmod(temporary, mode);
+    await rename(temporary, path);
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+function terminalStatus(previous: WorkerStatus, state: "completed" | "failed", details: { readonly message?: string } = {}): WorkerStatus {
   const completedAt = new Date().toISOString();
   return {
     schemaVersion: previous.schemaVersion,
@@ -50,26 +101,27 @@ function terminalStatus(previous: WorkerStatusFile, state: "completed" | "failed
 export function installPiMailboxExtension(pi: ExtensionAPI, environment: PiMailboxEnvironment = process.env): void {
   const jobId = environment.CHRYSAKI_WORKER_JOB_ID; const mailbox = environment.CHRYSAKI_MAILBOX;
   if (!jobId || !mailbox || !isAbsolute(mailbox)) throw new Error("Pi mailbox extension requires an absolute CHRYSAKI_MAILBOX and CHRYSAKI_WORKER_JOB_ID");
-  const paths = workerMailboxPaths(dirname(mailbox), jobId);
-  if (resolve(paths.directory) !== resolve(mailbox)) throw new Error("Pi mailbox extension job ID does not match its mailbox path");
+  if (!JOB_ID_PATTERN.test(jobId) || resolve(mailbox).split("/").at(-1) !== jobId) throw new Error("Pi mailbox extension job ID does not match its mailbox path");
+  const statusPath = resolve(mailbox, "status.json"); const resultPath = resolve(mailbox, "result.md");
   let terminalWritten = false;
 
-  pi.on("project_trust", (event) => {
+  pi.on("project_trust", (event: { readonly cwd: string }) => {
     if (environment.CHRYSAKI_CONFINED === "1" && workspaceContains(event.cwd)) return { trusted: "yes" as const, remember: false };
     return { trusted: "undecided" as const };
   });
 
-  pi.on("agent_settled", async (_event, ctx) => {
+  pi.on("agent_settled", async (_event: unknown, ctx: ExtensionContext) => {
     if (terminalWritten) return;
-    const previous = await readWorkerStatus(paths);
-    if (isTerminalWorkerState(previous.state)) { terminalWritten = true; return; }
+    const previous = await readStatus(statusPath, jobId);
+    if (TERMINAL_STATES.has(previous.state)) { terminalWritten = true; return; }
     const response = extractFinalAssistant(ctx);
     if (response.stopReason === "stop" && response.text) {
-      await writeCompletedResult(paths, response.text, terminalStatus(previous, "completed"), previous);
+      await atomicWrite(resultPath, response.text, 0o600);
+      await atomicWrite(statusPath, `${JSON.stringify(terminalStatus(previous, "completed"), null, 2)}\n`, 0o600);
       terminalWritten = true; return;
     }
     const reason = response.error ?? (response.stopReason ? `Assistant stopped with ${response.stopReason}` : "Assistant response was empty");
-    await writeWorkerStatus(paths, terminalStatus(previous, "failed", { message: reason }), previous);
+    await atomicWrite(statusPath, `${JSON.stringify(terminalStatus(previous, "failed", { message: reason }), null, 2)}\n`, 0o600);
     terminalWritten = true;
   });
 }

@@ -23,6 +23,12 @@ function context(message?: any): any {
   return { sessionManager: { getBranch: () => message ? [{ type: "message", message }] : [] } };
 }
 
+test("Pi mailbox extension has no package-local runtime dependencies inside the sandbox", async () => {
+  const source = await readFile(new URL("../../extensions/workers/pi-mailbox-extension.ts", import.meta.url), "utf8");
+  const runtimeImports = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);
+  assert.ok(runtimeImports.every((specifier) => specifier.startsWith("node:")), `unexpected sandbox runtime import: ${runtimeImports.join(", ")}`);
+});
+
 test("Pi worker completion writes result first and atomically publishes completed status", async () => {
   const item = await mailbox(); const harness = extensionHarness({ CHRYSAKI_WORKER_JOB_ID: item.jobId, CHRYSAKI_MAILBOX: item.paths.directory, CHRYSAKI_CONFINED: "1" });
   const trust = await harness.handlers.get("project_trust")![0]({ cwd: "/workspace/project" }, {}); assert.deepEqual(trust, { trusted: "yes", remember: false });
