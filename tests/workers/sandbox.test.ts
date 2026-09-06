@@ -32,6 +32,7 @@ test("sandbox profile exposes only explicit writable mounts and an ephemeral pri
   assert.equal(profile.mounts.find((mount) => mount.guestPath === "/workspace")?.writable, false);
   assert.equal(profile.mounts.find((mount) => mount.guestPath === "/mailbox")?.writable, true);
   assert.equal(profile.baseArgs.some((arg, index) => arg === "--ro-bind" && profile.baseArgs[index + 1] === "/"), false);
+  assert.equal(profile.baseArgs.includes("--new-session"), false, "interactive workers must retain their dedicated tmux controlling TTY");
   assert.equal((await stat(profile.homePath)).mode & 0o777, 0o700);
   assert.equal(profile.authPaths.length, 1); assert.notEqual(profile.authPaths[0].hostPath, fixture.auth); assert.equal(profile.authPaths[0].guestPath, "/home/worker/.provider/auth.json");
   assert.equal(await readFile(profile.authPaths[0].hostPath, "utf8"), "secret");

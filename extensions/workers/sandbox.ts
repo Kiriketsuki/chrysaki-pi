@@ -144,7 +144,10 @@ export class SandboxManager {
     });
     validateEnvironment(environment);
 
-    const args: string[] = ["--unshare-all", "--share-net", "--new-session", "--die-with-parent"];
+    // Do not use Bubblewrap's --new-session here. Workers already run in a
+    // dedicated tmux PTY; setsid() would detach that controlling terminal and
+    // interactive model CLIs exit during startup when /dev/tty is unavailable.
+    const args: string[] = ["--unshare-all", "--share-net", "--die-with-parent"];
     for (const path of STANDARD_RUNTIME_PATHS) {
       if (!(await exists(path))) continue;
       const info = await lstat(path);
