@@ -41,7 +41,7 @@ function bounded(value: string, maxBytes = 50 * 1024, maxLines = 2_000): string 
 function jobText(operation: string, jobs: readonly WorkerJobResult[]): string {
   const sections = jobs.map((entry) => {
     const heading = `${entry.job.id} · ${entry.status.state}${entry.job.selectedAdapter ? ` · ${entry.job.selectedAdapter}` : ""}`;
-    const body = entry.result ?? entry.status.progress ?? entry.status.failure?.message ?? "No authoritative result yet.";
+    const body = entry.result ?? entry.status.failure?.message ?? entry.status.progress ?? "No authoritative result yet.";
     const artifact = entry.resultTruncated && entry.resultPath ? `\n[Full result: ${entry.resultPath}]` : "";
     return `${heading}\n${body}${artifact}`;
   });
@@ -64,15 +64,15 @@ function renderer(name: string) {
 }
 
 export function registerWorkerTools(pi: ExtensionAPI | any, getBroker: () => WorkerBroker): void {
-  const dispatch = (params: any, cwd: string) => ({ ...params, cwd });
+  const dispatch = (params: any, ctx: any) => ({ ...params, cwd: ctx.cwd, ...(ctx.model?.provider && ctx.model?.id ? { parentModel: `${ctx.model.provider}/${ctx.model.id}` } : {}) });
   const inherited = parseInheritedWorkerContext();
   const ownership = (toolCallId: string, ctx: any) => ({ ownerId: toolCallId, parentSessionId: ctx.sessionManager?.getSessionFile?.() ?? ctx.sessionManager?.getSessionId?.() ?? `ephemeral:${ctx.cwd}`, depth: inherited.depth, ...(inherited.parentRunId ? { parentRunId: inherited.parentRunId } : {}), ...(inherited.ceiling ? { capabilityCeiling: inherited.ceiling } : {}) });
   pi.registerTool({
     name: "worker_preflight", label: "Chrysaki Worker Preflight", description: "Resolve worker admission, capability ceiling, confinement, routing, model, and task digests without launching workers or creating artifacts.",
     parameters: DispatchSchema, ...renderer("preflight"),
     async execute(id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {
-      const result = await getBroker().preflight(dispatch(params, ctx.cwd), { signal, ...ownership(id, ctx) });
-      return { content: [{ type: "text" as const, text: bounded(`worker_preflight: ${result.requested} task${result.requested === 1 ? "" : "s"}\n${JSON.stringify(result, null, 2)}`) }], details: { operation: "preflight", summaries: [] } };
+      const result = await getBroker().preflight(dispatch(params, ctx), { signal, ...ownership(id, ctx) });
+      return { content: [{ type: "text" as const, text: bounded(`worker_preflight: ${result.requested} task${result.requested === 1 ? "" : "s"}\n${JSON.stringify(result, null, 2)}`) }], details: { operation: "preflight", summaries: [], preflight: result } };
     },
   });
   pi.registerTool({
@@ -82,12 +82,12 @@ export function registerWorkerTools(pi: ExtensionAPI | any, getBroker: () => Wor
     parameters: DispatchSchema, ...renderer("run"),
     async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {
       onUpdate?.({ content: [{ type: "text", text: "Starting interactive Chrysaki workers…" }], details: { operation: "run", summaries: [] } });
-      const result: WorkerBatchResult = await getBroker().run(dispatch(params, ctx.cwd), { signal, ...ownership(id, ctx) }); return toolResult("worker_run", result.jobs, result.concurrency);
+      const result: WorkerBatchResult = await getBroker().run(dispatch(params, ctx), { signal, ...ownership(id, ctx) }); return toolResult("worker_run", result.jobs, result.concurrency);
     },
   });
   pi.registerTool({
     name: "worker_spawn", label: "Chrysaki Worker Spawn", description: "Start one or more sandboxed interactive tmux model workers and return after startup.", parameters: DispatchSchema, ...renderer("spawn"),
-    async execute(id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) { const result = await getBroker().spawn(dispatch(params, ctx.cwd), { signal, ...ownership(id, ctx) }); return toolResult("worker_spawn", result.jobs, result.concurrency); },
+    async execute(id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) { const result = await getBroker().spawn(dispatch(params, ctx), { signal, ...ownership(id, ctx) }); return toolResult("worker_spawn", result.jobs, result.concurrency); },
   });
   pi.registerTool({
     name: "worker_wait", label: "Chrysaki Worker Wait", description: "Wait for authoritative terminal mailbox states for worker jobs.",

@@ -1,5 +1,6 @@
 import { Text } from "@earendil-works/pi-tui";
 import type { WorkerJobResult } from "./broker.ts";
+import type { WorkerPreflightResult } from "./contracts.ts";
 
 export interface WorkerSummary {
   readonly id: string;
@@ -17,6 +18,7 @@ export interface WorkerToolDetails {
   readonly operation: string;
   readonly summaries: readonly WorkerSummary[];
   readonly concurrency?: number;
+  readonly preflight?: WorkerPreflightResult;
   readonly reveal?: { readonly mode: string; readonly command: string; readonly paneId?: string };
   readonly cleanup?: readonly { readonly jobId: string; readonly cleaned: boolean; readonly retained: boolean; readonly dirty: boolean; readonly reason?: string; readonly archivePath?: string }[];
 }
@@ -37,7 +39,7 @@ export function summarizeWorker(job: WorkerJobResult, now = Date.now()): WorkerS
     ...(job.job.cleanupDeadline ? { cleanupDeadline: job.job.cleanupDeadline } : {}),
     ...(job.resultTruncated !== undefined ? { resultTruncated: job.resultTruncated } : {}),
     ...(job.resultPath ? { resultPath: job.resultPath } : {}),
-    ...(job.status.progress ? { progress: job.status.progress } : {}),
+    ...(job.status.failure?.message || job.status.progress ? { progress: job.status.failure?.message ?? job.status.progress } : {}),
   });
 }
 
@@ -66,10 +68,15 @@ export function renderWorkerResult(result: any, options: { readonly expanded: bo
   const details = result.details as WorkerToolDetails | undefined;
   if (!details) { component.setText(theme.fg("muted", "Worker result unavailable")); return component; }
   const lines: string[] = [];
+  if (details.preflight) {
+    lines.push(theme.fg("success", `Preflight ready: ${details.preflight.requested} tasks · concurrency ${details.preflight.concurrency}`));
+    for (const item of details.preflight.items) lines.push(theme.fg("muted", `  ${item.childIndex + 1}. ${item.adapter} · ${item.model ?? "CLI default model"}`));
+    lines.push(theme.fg("dim", "No workers launched; provider billing/connectivity is verified only during execution."));
+  }
   for (const item of details.summaries ?? []) {
     const color = item.state === "completed" ? "success" : ["failed", "timed_out", "cancelled"].includes(item.state) ? "error" : "accent";
     lines.push(`${theme.fg(color, item.state === "completed" ? "✓" : item.state === "running" ? "◆" : "•")} ${theme.fg("text", item.id)} ${theme.fg("muted", `${item.state}${item.adapter ? ` · ${item.adapter}` : ""} · ${duration(item.elapsedMs)}`)}`);
-    if (options.expanded && item.progress) lines.push(theme.fg("dim", `  ${item.progress}`));
+    if (item.progress && (options.expanded || ["failed", "timed_out", "blocked"].includes(item.state))) lines.push(theme.fg("dim", `  ${item.progress}`));
     if (options.expanded && item.workspace) lines.push(theme.fg("dim", `  workspace ${item.workspace}`));
   }
   if (details.reveal) lines.push(theme.fg("accent", details.reveal.mode === "split" ? `Revealed ${details.reveal.paneId ?? "worker pane"}` : details.reveal.command));

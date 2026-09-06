@@ -29,6 +29,12 @@ test("interactive adapter argv remains allowed and provider identity is enforced
   assert.throws(() => assertInteractiveModelArgv([]), /argv array/);
 });
 
+test("resolved CLI symlinks cannot bypass provider-specific headless checks", () => {
+  assert.throws(() => assertInteractiveModelArgv(["/opt/pi/dist/cli.js", "-p", "task"], "pi", "/opt/pi/dist/cli.js"), /worker_run/);
+  assert.throws(() => assertInteractiveModelArgv(["/opt/claude/2.1.263", "--print"], "claude", "/opt/claude/2.1.263"), /worker_run/);
+  assert.throws(() => assertInteractiveModelArgv(["/opt/codex/bin", "exec"], "codex", "/opt/codex/bin"), /worker_run/);
+});
+
 const shellCommands = [
   "pi -p 'do work'",
   "env TOKEN=x /usr/bin/claude --print task",

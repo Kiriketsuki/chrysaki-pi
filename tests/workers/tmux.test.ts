@@ -28,6 +28,10 @@ test("detached launch passes worker command as argv without shell interpolation"
   assert.equal(worker.cwd, "/tmp");
   assert.equal(worker.options["@chrysaki-job-id"], jobId);
   assert.equal(worker.options["@chrysaki-owner-id"], "owner-1");
+  assert.equal(worker.options["remain-on-exit"], "on");
+  const respawn = state.calls.findIndex((call) => call.args[0] === "respawn-pane");
+  assert.ok(respawn > state.calls.findIndex((call) => call.args.includes("remain-on-exit")));
+  assert.ok(state.calls.every((call) => !call.args.includes("-g")));
   const launch = state.calls[0].args;
   assert.deepEqual(launch.slice(0, 6), ["new-session", "-d", "-s", session.name, "-c", "/tmp"]);
   assert.ok(launch.includes("WORKER_MAILBOX=/tmp/mail box"));
@@ -42,18 +46,53 @@ test("ownership proof verifies exact tmux metadata before termination", async ()
   assert.equal(await fake.transport.terminateOwned(session.name, jobId, "owner"), true); assert.equal(await fake.transport.hasSession(session.name), false);
 });
 
+test("real tmux retains an immediate CLI failure without changing global options", async (t) => {
+  const transport = new TmuxTransport();
+  const jobId = createWorkerId(); const ownerId = "live-tmux-regression";
+  let session: string | undefined;
+  try {
+    if (!(await transport.preflight()).available) { t.skip("tmux is unavailable"); return; }
+    const launched = await transport.launch({ jobId, ownerId, cwd: tmpdir(), argv: ["/bin/sh", "-c", "printf 'retained startup failure\\n'; exit 7"] });
+    session = launched.name;
+    let pane = await transport.inspectPane(session);
+    for (let attempts = 0; !pane.dead && attempts < 100; attempts++) {
+      await new Promise((done) => setTimeout(done, 10)); pane = await transport.inspectPane(session);
+    }
+    assert.deepEqual(pane, { exists: true, dead: true, exitCode: 7 });
+    assert.match(await transport.capturePane(session), /retained startup failure/);
+  } finally {
+    if (session) assert.equal(await transport.terminateOwned(session, jobId, ownerId), true);
+    transport.dispose();
+  }
+});
+
+test("pane liveness includes retained exit codes and missing sessions", async () => {
+  const fake = await harness(); const jobId = createWorkerId();
+  try {
+    const session = await fake.transport.launch({ jobId, ownerId: "owner", cwd: "/tmp", argv: ["pi"] });
+    assert.deepEqual(await fake.transport.inspectPane(session.name), { exists: true, dead: false });
+    const state = await fake.read(); state.sessions[session.name].dead = true; state.sessions[session.name].exitCode = 7;
+    await writeFile(fake.statePath, JSON.stringify(state));
+    assert.deepEqual(await fake.transport.inspectPane(session.name), { exists: true, dead: true, exitCode: 7 });
+    await fake.transport.kill(session.name);
+    assert.deepEqual(await fake.transport.inspectPane(session.name), { exists: false, dead: true });
+  } finally { fake.transport.dispose(); }
+});
+
 test("private buffers deliver exact prompt content and are deleted", async () => {
   const fake = await harness(); const jobId = createWorkerId(); const session = await fake.transport.launch({ jobId, ownerId: "owner", cwd: "/tmp", argv: ["pi"] });
   const prompt = "line one\n'quoted' $HOME; echo nope";
   await fake.transport.paste(session.name, prompt);
   const state = await fake.read();
-  assert.deepEqual(state.sessions[session.name].pastes, [`${prompt}\n`]);
+  assert.deepEqual(state.sessions[session.name].pastes, [prompt]);
+  assert.ok(state.calls.some((call) => call.args[0] === "paste-buffer" && call.args.includes("-p")));
+  assert.deepEqual(state.sessions[session.name].keys, ["Enter"]);
   assert.deepEqual(state.buffers, {});
   const load = state.calls.find((call) => call.args[0] === "load-buffer")!;
   const paste = state.calls.find((call) => call.args[0] === "paste-buffer")!;
-  assert.equal(load.input, `${prompt}\n`); assert.ok(load.args[2].startsWith("chrysaki-paste-"));
+  assert.equal(load.input, prompt); assert.ok(load.args[2].startsWith("chrysaki-paste-"));
   assert.ok(paste.args.includes("-d"));
-  assert.equal(state.calls.some((call) => call.args[0] === "send-keys"), false);
+  assert.deepEqual(state.calls.filter((call) => call.args[0] === "send-keys").map((call) => call.args), [["send-keys", "-t", session.name, "Enter"]]);
   fake.transport.dispose();
 });
 

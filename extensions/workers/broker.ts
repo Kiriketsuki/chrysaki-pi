@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { copyFile, chmod } from "node:fs/promises";
+import { stripTerminalControl } from "./adapters/base.ts";
 import { access, cp, mkdir, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import { WorkerAdmissionController, defaultAdmissionPath } from "./admission.ts";
 import { WORKER_CEILING_ENV, WORKER_DEPTH_ENV, WORKER_PARENT_RUN_ENV, assertWorkerRequestWithinCeiling, filterRoutingByCeiling, serializeWorkerCapabilityCeiling, tightenWorkerCapabilityCeiling } from "./capability-ceiling.ts";
@@ -20,6 +22,7 @@ export interface WorkerDispatchInput {
   readonly access: "read" | "write";
   readonly capabilities?: readonly string[];
   readonly preferredCli?: "pi" | "claude" | "codex";
+  readonly parentModel?: string;
   readonly allowFallback?: boolean;
   readonly cwd: string;
   readonly concurrency?: number;
@@ -178,8 +181,16 @@ export class WorkerBroker {
     if (this.disposed || !this.monitoring || ![...this.jobs.values()].some((job) => !isTerminalWorkerState(job.status.state))) return;
     this.monitorTimer = setTimeout(() => {
       this.monitorTimer = undefined;
-      void Promise.all([...this.jobs.values()].filter((job) => !isTerminalWorkerState(job.status.state)).map((job) => this.refreshSerialized(job)))
-        .finally(() => this.scheduleMonitor());
+      // Runtime disposal can interrupt an in-flight tmux query. Settle every
+      // monitor rejection so a reload never crashes the parent process.
+      void Promise.allSettled([...this.jobs.values()].filter((job) => !isTerminalWorkerState(job.status.state)).map(async (job) => {
+        try { await this.refreshSerialized(job); }
+        catch (error) {
+          if (this.disposed) return;
+          job.lastMailboxError = `Worker monitor error: ${error instanceof Error ? error.message : String(error)}`;
+          await this.persist(job);
+        }
+      })).then(() => this.scheduleMonitor());
     }, this.pollIntervalMs);
     this.monitorTimer.unref?.();
   }
@@ -245,11 +256,46 @@ export class WorkerBroker {
     await this.tmux.archivePane(managed.session.name, managed.paths.pane).catch(() => undefined);
   }
 
+  private async exitDetail(managed: ManagedJob): Promise<string | undefined> {
+    if (!managed.session) return undefined;
+    const pane = await this.tmux.inspectPane(managed.session.name);
+    if (pane.exists && !pane.dead) return undefined;
+    const output = pane.exists ? await this.tmux.capturePane(managed.session.name, 80).catch(() => "") : "";
+    const tail = stripTerminalControl(output).trim().split("\n").filter((line) => line.trim()).slice(-12).join("\n");
+    return `${managed.job.selectedAdapter ?? "Worker"} exited${pane.exitCode !== undefined ? ` (exit ${pane.exitCode})` : ""}${tail ? `:\n${boundedText(tail, 2_000)}` : " without diagnostics"}`;
+  }
+
+  private async interrupt(managed: ManagedJob): Promise<void> {
+    if (!managed.session) return;
+    const fallback = () => this.tmux.interrupt(managed.session!.name, managed.job.selectedAdapter === "claude" ? "C-c" : "Escape").catch(() => undefined);
+    if (managed.adapter) await managed.adapter.interrupt({ jobId: managed.job.id, tmuxSession: managed.session.name }).catch(fallback);
+    else await fallback();
+  }
+
+  private async stop(managed: ManagedJob): Promise<void> {
+    if (managed.session && !(await this.tmux.verifyOwnership(managed.session.name, managed.job.id, managed.ownerId))) {
+      throw new WorkerBrokerError(`Worker ${managed.job.id} process ownership could not be proven; refusing to interrupt it`);
+    }
+    await this.interrupt(managed);
+    await this.archiveDiagnostics(managed);
+    // CLI interrupt keys can stop generation while leaving a tool subprocess
+    // alive (observed with Codex). End the owned sandbox, not just its request.
+    // Retain the mailbox and captured pane for diagnostics until grace cleanup.
+    if (managed.session && !(await this.tmux.terminateOwned(managed.session.name, managed.job.id, managed.ownerId))) {
+      throw new WorkerBrokerError(`Worker ${managed.job.id} is terminal but its process could not be stopped safely`);
+    }
+    managed.processTerminalProof = Object.freeze({ verifiedAt: new Date(this.now()).toISOString(), ...(managed.session ? { session: managed.session.name } : {}), terminated: true });
+    await this.persist(managed);
+  }
+
   private async failStartup(managed: ManagedJob, code: string, message: string): Promise<void> {
     if (isTerminalWorkerState(managed.status.state)) return;
     await this.transition(managed, "failed", { progress: message, failure: failure(code, message) });
-    if (managed.adapter && managed.session) await managed.adapter.interrupt({ jobId: managed.job.id, tmuxSession: managed.session.name }).catch(() => this.tmux.interrupt(managed.session!.name).catch(() => undefined));
-    await this.archiveDiagnostics(managed);
+    await this.stop(managed);
+  }
+
+  private selectedModel(request: WorkerRequest, adapter: "pi" | "claude" | "codex"): string | undefined {
+    return this.config.adapters[adapter].model ?? (adapter === "pi" ? request.parentModel : undefined);
   }
 
   private async launch(managed: ManagedJob, policy: ResolvedWorkerPolicy, signal?: AbortSignal): Promise<void> {
@@ -267,20 +313,30 @@ export class WorkerBroker {
         runtimeReadOnlyPaths: [...(managed.adapter.runtimeReadOnlyPaths ?? []), runtimeRoot],
         environment: { ...(managed.adapter.sandboxEnvironment?.() ?? {}), [WORKER_CEILING_ENV]: serializeWorkerCapabilityCeiling(managed.ceiling ?? this.inheritedCeiling), [WORKER_DEPTH_ENV]: String((managed.job.depth ?? 0) + 1), [WORKER_PARENT_RUN_ENV]: managed.job.runId ?? managed.ownerId },
       });
-      managed.launchContract = createWorkerLaunchContract({ job: managed.job, adapterId: routed.selection.adapterId, executablePath, model: this.config.adapters[managed.adapter.id].model, ceiling: managed.ceiling ?? this.inheritedCeiling, workspace: lease, sandbox: managed.profile, timeoutMs: managed.job.request.timeoutMs ?? policy.timeoutMs, retentionMs: managed.job.request.retentionMs ?? policy.retentionMs, attempts: routed.selection.attempts, policySources: policy.source });
+      const model = this.selectedModel(managed.job.request, managed.adapter.id);
+      await managed.adapter.prepareHome?.(managed.profile.homePath);
+      if (managed.adapter.completionHelper === "mailbox-instructions") {
+        const helperPath = join(managed.paths.directory, "complete.mjs");
+        await copyFile(new URL("./external-mailbox-helper.mjs", import.meta.url), helperPath);
+        await chmod(helperPath, 0o600);
+      }
+      managed.launchContract = createWorkerLaunchContract({ job: managed.job, adapterId: routed.selection.adapterId, executablePath, model, ceiling: managed.ceiling ?? this.inheritedCeiling, workspace: lease, sandbox: managed.profile, timeoutMs: managed.job.request.timeoutMs ?? policy.timeoutMs, retentionMs: managed.job.request.retentionMs ?? policy.retentionMs, attempts: routed.selection.attempts, policySources: policy.source });
       managed.job = Object.freeze({ ...managed.job, launchContractDigest: managed.launchContract.digest, updatedAt: new Date(this.now()).toISOString() }); await this.persist(managed);
-      const adapterArgv = managed.adapter.buildInteractiveArgv({ confinementActive: true, executablePath, job: managed.job, workspacePath: "/workspace", mailboxPath: "/mailbox", homePath: "/home/worker", model: this.config.adapters[managed.adapter.id].model, interactiveArgs: this.config.adapters[managed.adapter.id].interactiveArgs });
+      const adapterArgv = managed.adapter.buildInteractiveArgv({ confinementActive: true, executablePath, job: managed.job, workspacePath: "/workspace", mailboxPath: "/mailbox", homePath: "/home/worker", model, interactiveArgs: this.config.adapters[managed.adapter.id].interactiveArgs });
       const launchArgv = this.sandbox.buildArgv(managed.profile, adapterArgv);
       managed.session = await this.tmux.launch({ jobId: managed.job.id, ownerId: managed.ownerId, cwd: managed.job.request.cwd, argv: launchArgv });
       managed.job = Object.freeze({ ...managed.job, tmuxSession: managed.session.name, updatedAt: new Date(this.now()).toISOString() });
       await this.persist(managed);
       const startupDeadline = this.now() + Math.min(this.startupTimeoutMs, managed.job.request.timeoutMs ?? policy.timeoutMs);
       const answered = new Set<string>();
+      let readyObservations = 0;
       while (this.now() < startupDeadline) {
         signal?.throwIfAborted();
-        if (!(await this.tmux.hasSession(managed.session.name))) throw new WorkerBrokerError(`${managed.adapter.id} exited before becoming ready`);
-        const recognition = managed.adapter.recognizeScreen(await this.tmux.capturePane(managed.session.name, 200));
-        if (recognition.state === "ready") {
+        const exit = await this.exitDetail(managed);
+        if (exit) throw new WorkerBrokerError(exit);
+        const recognition = managed.adapter.recognizeScreen(await this.tmux.capturePane(managed.session.name, 0));
+        readyObservations = recognition.state === "ready" ? readyObservations + 1 : 0;
+        if (recognition.state === "ready" && readyObservations >= 2) {
           await this.transition(managed, "ready", { progress: `${managed.adapter.id} is ready` });
           const prompt = managed.adapter.buildPrompt({ jobId: managed.job.id, task: managed.job.request.task, mailboxPath: "/mailbox" });
           await this.tmux.paste(managed.session.name, prompt);
@@ -297,8 +353,7 @@ export class WorkerBroker {
         await this.sleep(this.pollIntervalMs, signal);
       }
       await this.transition(managed, "timed_out", { progress: "Interactive provider startup timed out", failure: failure("startup_timed_out", "Interactive provider did not become ready before its startup deadline", true) });
-      await managed.adapter.interrupt({ jobId: managed.job.id, tmuxSession: managed.session.name }).catch(() => this.tmux.interrupt(managed.session!.name).catch(() => undefined));
-      await this.archiveDiagnostics(managed);
+      await this.stop(managed);
     } catch (error) {
       if (signal?.aborted) throw error;
       await this.failStartup(managed, "startup_failed", error instanceof Error ? error.message : String(error));
@@ -312,7 +367,7 @@ export class WorkerBroker {
     return items.map((item) => {
       const task = typeof item === "string" ? item : item.task; const role = typeof item === "string" ? undefined : item.role;
       const itemMetadata = typeof item === "string" ? {} : item.metadata ?? {};
-      return validateWorkerRequest({ task, ...(role ? { role } : {}), capabilities: input.capabilities ?? [], access: input.access, ...(input.preferredCli ? { preferredCli: input.preferredCli } : {}), allowFallback: input.allowFallback ?? true, cwd: input.cwd, concurrency: policy.concurrency, timeoutMs: input.timeoutMs ?? policy.timeoutMs, retentionMs: input.retentionMs ?? policy.retentionMs, ...(input.workflow ? { workflow: input.workflow } : {}), metadata: { ...(input.metadata ?? {}), ...itemMetadata, scheduling: { concurrency: policy.concurrency, source: policy.source.concurrency } } });
+      return validateWorkerRequest({ task, ...(role ? { role } : {}), capabilities: input.capabilities ?? [], access: input.access, ...(input.preferredCli ? { preferredCli: input.preferredCli } : {}), ...(input.parentModel ? { parentModel: input.parentModel } : {}), allowFallback: input.allowFallback ?? true, cwd: input.cwd, concurrency: policy.concurrency, timeoutMs: input.timeoutMs ?? policy.timeoutMs, retentionMs: input.retentionMs ?? policy.retentionMs, ...(input.workflow ? { workflow: input.workflow } : {}), metadata: { ...(input.metadata ?? {}), ...itemMetadata, scheduling: { concurrency: policy.concurrency, source: policy.source.concurrency } } });
     });
   }
 
@@ -326,7 +381,8 @@ export class WorkerBroker {
     await this.admission.checkBatch(parentSessionId, runId, requests.length, ceiling); const admission = await this.admission.snapshot(parentSessionId, runId);
     const items = await Promise.all(requests.map(async (request, childIndex) => {
       const selected = await this.router.route(request, policy, options.signal);
-      return Object.freeze({ childIndex, taskDigest: taskDigest(request), adapter: selected.adapterId, executablePath: selected.executablePath, ...(this.config.adapters[selected.adapterId].model ? { model: this.config.adapters[selected.adapterId].model } : {}), routingAttempts: selected.attempts });
+      const model = this.selectedModel(request, selected.adapterId);
+      return Object.freeze({ childIndex, taskDigest: taskDigest(request), adapter: selected.adapterId, executablePath: selected.executablePath, ...(model ? { model } : {}), routingAttempts: selected.attempts });
     }));
     return Object.freeze({ ok: true, sideEffectFree: true, runId, parentSessionId, requested: requests.length, concurrency: policy.concurrency, ceiling, admission: Object.freeze({ active: admission.active, sessionSpawns: admission.sessionSpawns, runSpawns: admission.runSpawns }), items: Object.freeze(items) });
   }
@@ -392,11 +448,11 @@ export class WorkerBroker {
     if (managed.deadline !== undefined && this.now() >= managed.deadline) {
       const detail = managed.lastMailboxError ? `; last mailbox error: ${managed.lastMailboxError}` : "";
       await this.transition(managed, "timed_out", { progress: `Worker deadline expired${detail}`, failure: failure("worker_timed_out", `No authoritative terminal mailbox result before deadline${detail}`, true) });
-      if (managed.adapter && managed.session) await managed.adapter.interrupt({ jobId: managed.job.id, tmuxSession: managed.session.name }).catch(() => this.tmux.interrupt(managed.session!.name).catch(() => undefined));
-      await this.archiveDiagnostics(managed); return;
+      await this.stop(managed); return;
     }
-    if (managed.session && !(await this.tmux.hasSession(managed.session.name))) {
-      await this.transition(managed, "failed", { progress: "Interactive worker session exited without terminal mailbox state", failure: failure("worker_exited", "Tmux worker exited without an authoritative result") });
+    const exit = await this.exitDetail(managed);
+    if (exit) {
+      await this.transition(managed, "failed", { progress: "Interactive worker session exited without terminal mailbox state", failure: failure("worker_exited", exit) });
       await this.archiveDiagnostics(managed);
     }
   }
@@ -451,8 +507,7 @@ export class WorkerBroker {
       await this.refreshSerialized(managed);
       if (isTerminalWorkerState(managed.status.state)) return;
       await this.transition(managed, "cancelled", { progress: reason, failure: failure("worker_cancelled", reason) });
-      if (managed.adapter && managed.session) await managed.adapter.interrupt({ jobId: managed.job.id, tmuxSession: managed.session.name }).catch(() => this.tmux.interrupt(managed.session!.name).catch(() => undefined));
-      await this.archiveDiagnostics(managed);
+      await this.stop(managed);
     }));
     return Object.freeze(await Promise.all(targets.map((job) => this.result(job))));
   }

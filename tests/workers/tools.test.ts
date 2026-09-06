@@ -50,6 +50,18 @@ test("worker_run forwards invocation ownership, cwd, cancellation, and compact p
   assert.equal(output.details.summaries[0].id, id); assert.equal(Object.hasOwn(output.details.summaries[0], "result"), false); assert.equal(updates.length, 1);
 });
 
+test("dispatch inherits the current context model and preflight has a useful renderer", async () => {
+  const { tools, calls } = harness();
+  const ctx = { cwd: "/repo", model: { provider: "openai-codex", id: "parent-model" } };
+  const output = await tools.get("worker_preflight").execute("preflight", { task: "read", access: "read" }, undefined, undefined, ctx);
+  assert.equal(calls[0][1].parentModel, "openai-codex/parent-model");
+  assert.equal(output.details.preflight.ok, true);
+  const rendered = tools.get("worker_preflight").renderResult(output, { expanded: false, isPartial: false }, theme, { lastComponent: undefined });
+  assert.match(rendered.render(120).join("\n"), /Preflight ready: 1 tasks/);
+  await tools.get("worker_run").execute("run", { task: "read", access: "read" }, undefined, undefined, ctx);
+  assert.equal(calls[1][1].parentModel, "openai-codex/parent-model");
+});
+
 test("model-visible aggregate output remains within Pi byte and line bounds", async () => {
   const huge = Array.from({ length: 3_000 }, () => "x".repeat(100)).join("\n"); const { tools } = harness(huge);
   const output = await tools.get("worker_run").execute("call", { task: "large", access: "read" }, undefined, undefined, { cwd: "/repo" }); const text = output.content[0].text;

@@ -1,6 +1,6 @@
 {
   "name": "@kiriketsuki/chrysaki-pi",
-  "version": "1.2.11",
+  "version": "1.2.12",
   "description": "Chrysaki theme integration for Pi",
   "type": "module",
   "license": "MIT",
@@ -39,7 +39,7 @@
     "prompts": [
       "./prompts"
     ],
-    "image": "https://raw.githubusercontent.com/Kiriketsuki/chrysaki-pi/v1.2.11/docs/chrysaki-pi-interface.png"
+    "image": "https://raw.githubusercontent.com/Kiriketsuki/chrysaki-pi/v1.2.12/docs/chrysaki-pi-interface.png"
   },
   "files": [
     "extensions",
@@ -47,6 +47,7 @@
     "prompts",
     "adapters",
     "docs/chrysaki-pi-interface.png",
+    "docs/testing/workers-live-smoke.md",
     "scripts/codex-rate-limits.mjs",
     "README.md",
     "LICENSE"

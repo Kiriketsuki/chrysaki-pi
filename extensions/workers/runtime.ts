@@ -42,7 +42,7 @@ export async function createChrysakiWorkerRuntime(options: ChrysakiWorkerRuntime
   const adapterOptions = (id: "pi" | "claude" | "codex") => ({
     environment: { ...process.env, ...config.adapters[id].environment },
     recognizedResponses: config.adapters[id].recognizedResponses,
-    interrupt: (session: string, signal?: AbortSignal) => signal?.aborted ? Promise.reject(signal.reason) : tmux.interrupt(session),
+    interrupt: (session: string, signal?: AbortSignal) => signal?.aborted ? Promise.reject(signal.reason) : tmux.interrupt(session, id === "claude" ? "C-c" : "Escape"),
   });
   const adapters = [new PiWorkerAdapter(adapterOptions("pi")), new ClaudeWorkerAdapter(adapterOptions("claude")), new CodexWorkerAdapter(adapterOptions("codex"))];
   const router = new WorkerRouter({ config, adapters, sandbox });

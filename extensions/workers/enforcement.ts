@@ -58,6 +58,12 @@ export function assertInteractiveModelArgv(argv: readonly string[], expectedProv
   const violation = findHeadlessModelArgv(argv); if (violation) throw new HeadlessInvocationError(violation);
   if (expectedProvider && executableName(argv[0]) !== expectedProvider && argv[0] !== resolvedExecutable)
     throw new HeadlessInvocationError({ provider: expectedProvider, executable: argv[0], reason: `Adapter ${expectedProvider} attempted to launch a different executable` });
+  // realpath may resolve pi -> cli.js or claude -> a version-number binary.
+  // Check options against the known provider, not only the resolved basename.
+  if (expectedProvider) {
+    const resolvedViolation = findHeadlessModelArgv([expectedProvider, ...argv.slice(1)]);
+    if (resolvedViolation) throw new HeadlessInvocationError({ ...resolvedViolation, executable: argv[0] });
+  }
 }
 
 interface ShellToken { readonly value: string; readonly operator: boolean; }

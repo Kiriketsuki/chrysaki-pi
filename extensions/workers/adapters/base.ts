@@ -59,11 +59,11 @@ export function externalMailboxInstructions(context: AdapterPromptContext): stri
     `Job ID: ${context.jobId}`,
     `Mailbox: ${context.mailboxPath}`,
     "The pane is diagnostic only. Before ending, you MUST make the mailbox authoritative:",
-    `1. Write your complete final answer to ${context.mailboxPath}/result.tmp, fsync if your tools permit, then atomically rename it to ${context.mailboxPath}/result.md.`,
-    `2. Read ${context.mailboxPath}/status.json and preserve schemaVersion, jobId, createdAt, and startedAt.`,
-    `3. Write ${context.mailboxPath}/status.tmp as strict JSON with state=\"completed\", updatedAt and completedAt as current ISO timestamps, resultPath=\"result.md\", and no failure field; atomically rename it to ${context.mailboxPath}/status.json.`,
-    "4. If the task fails, atomically replace status.json with state=\"failed\", current updatedAt/completedAt, and failure={code,message,retryable:false}; do not claim completion.",
-    "Do not use pane output as the result channel. Do not finish until the atomic mailbox writes succeed.",
+    `1. Write your complete final answer as plain text to ${context.mailboxPath}/answer.txt.`,
+    `2. Run: node ${context.mailboxPath}/complete.mjs ${context.mailboxPath}/answer.txt`,
+    `3. If the task fails, run: node ${context.mailboxPath}/complete.mjs --fail task_failed 'a clear explanation'`,
+    "The helper atomically writes result.md and strict status.json. Do not invent status JSON or timestamps yourself.",
+    "Do not use pane output as the result channel. Do not finish until the helper succeeds.",
   ].join("\n");
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -48,6 +48,25 @@ test("Bubblewrap read profiles prevent source writes while allowing mailbox writ
   assert.equal(await readFile(join(fixture.mailbox, "proof.txt"), "utf8"), "ok");
   await assert.rejects(() => stat(join(fixture.source, "forbidden.txt")), { code: "ENOENT" });
   await fixture.workspaces.cleanup(fixture.lease.owningJobId); fixture.workspaces.dispose(); fixture.sandbox.dispose();
+});
+
+test("Bubblewrap preserves the resolver file through /etc symlinks without exposing /run", async (t) => {
+  const fixture = await profileFixture("read");
+  t.after(async () => { await fixture.workspaces.cleanup(fixture.lease.owningJobId); fixture.workspaces.dispose(); fixture.sandbox.dispose(); });
+  const readiness = await fixture.sandbox.preflight();
+  if (!readiness.usable) { t.skip(`Bubblewrap unavailable: ${readiness.reason}`); return; }
+  let resolver: string;
+  try { resolver = await realpath("/etc/resolv.conf"); }
+  catch { t.skip("Host has no resolver file"); return; }
+  // Do not query an external service: verify that the actual confined process
+  // can read exactly the host resolver configuration through its normal path.
+  const argv = fixture.sandbox.buildArgv(fixture.profile, ["/bin/cat", "/etc/resolv.conf"]);
+  const result = await exec(argv[0], [...argv.slice(1)]);
+  assert.equal(result.stdout, await readFile(resolver, "utf8"));
+  assert.equal(fixture.profile.baseArgs.some((arg, index) => ["--bind", "--ro-bind"].includes(arg) && fixture.profile.baseArgs[index + 1] === "/run"), false);
+  if (resolver.startsWith("/run/")) {
+    assert.ok(fixture.profile.baseArgs.some((arg, index) => arg === "--ro-bind" && fixture.profile.baseArgs[index + 1] === resolver && fixture.profile.baseArgs[index + 2] === resolver));
+  }
 });
 
 test("Bubblewrap write profiles modify only the dedicated worktree", async (t) => {

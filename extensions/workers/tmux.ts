@@ -92,11 +92,16 @@ export class TmuxTransport {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || value.includes("\0")) throw new TmuxTransportError(`Invalid worker environment entry: ${key}`);
       return ["-e", `${key}=${value}`];
     });
-    // tmux 3.x accepts command and arguments separately after `--`; no shell command is constructed.
-    await this.execute(["new-session", "-d", "-s", name, "-c", request.cwd, ...envArgs, "--", ...request.argv]);
+    // Create a parked pane first. Tag it and retain exited panes BEFORE starting
+    // the CLI, so even an immediate startup failure keeps its exit code/log.
+    // Settings are local to this worker window, never global tmux options.
+    await this.execute(["new-session", "-d", "-s", name, "-c", request.cwd, ...envArgs, "--", "/bin/sleep", "86400"]);
     try {
       await this.execute(["set-option", "-t", name, "@chrysaki-job-id", request.jobId]);
       await this.execute(["set-option", "-t", name, "@chrysaki-owner-id", request.ownerId]);
+      await this.execute(["set-option", "-w", "-t", name, "remain-on-exit", "on"]);
+      // tmux accepts command and arguments separately; no shell interpolation.
+      await this.execute(["respawn-pane", "-k", "-t", name, "-c", request.cwd, ...envArgs, "--", ...request.argv]);
     } catch (error) {
       await this.execute(["kill-session", "-t", name], undefined, true);
       throw error;
@@ -107,6 +112,18 @@ export class TmuxTransport {
   async hasSession(session: string): Promise<boolean> {
     validateSessionName(session);
     return (await this.execute(["has-session", "-t", session], undefined, true)).code === 0;
+  }
+
+  async inspectPane(session: string): Promise<{ readonly exists: boolean; readonly dead: boolean; readonly exitCode?: number }> {
+    validateSessionName(session);
+    const result = await this.execute(["display-message", "-p", "-t", session, "#{pane_dead}|#{pane_dead_status}"], undefined, true);
+    if (result.code !== 0) {
+      if (!(await this.hasSession(session))) return { exists: false, dead: true };
+      throw new TmuxTransportError("Unable to inspect retained worker pane", [], result);
+    }
+    const [dead, code] = result.stdout.trim().split("|");
+    if (dead !== "0" && dead !== "1") throw new TmuxTransportError("Invalid worker pane state", [], result);
+    return { exists: true, dead: dead === "1", ...(code && /^\d+$/.test(code) ? { exitCode: Number(code) } : {}) };
   }
 
   async verifyOwnership(session: string, jobId: string, ownerId: string): Promise<boolean> {
@@ -131,10 +148,12 @@ export class TmuxTransport {
     if (text.includes("\0")) throw new TmuxTransportError("Tmux paste content cannot contain NUL bytes");
     const buffer = `chrysaki-paste-${randomUUID()}`;
     if (!BUFFER_PATTERN.test(buffer)) throw new TmuxTransportError("Invalid private tmux buffer name");
-    await this.execute(["load-buffer", "-b", buffer, "-"], `${text}${submit ? "\n" : ""}`);
+    await this.execute(["load-buffer", "-b", buffer, "-"], text);
     try {
-      // -d deletes the private buffer only after a successful paste.
-      await this.execute(["paste-buffer", "-d", "-b", buffer, "-t", session]);
+      // Preserve multiline text as one bracketed paste. A newline inside the
+      // buffer is data, not a reliable submit key in modern CLI editors.
+      await this.execute(["paste-buffer", "-p", "-d", "-b", buffer, "-t", session]);
+      if (submit) await this.execute(["send-keys", "-t", session, "Enter"]);
     } catch (error) {
       await this.execute(["delete-buffer", "-b", buffer], undefined, true);
       throw error;
@@ -143,8 +162,8 @@ export class TmuxTransport {
 
   async capturePane(session: string, historyLines = 2_000): Promise<string> {
     validateSessionName(session);
-    if (!Number.isInteger(historyLines) || historyLines < 1 || historyLines > 100_000) throw new TmuxTransportError("Invalid pane history line count");
-    return (await this.execute(["capture-pane", "-p", "-e", "-S", `-${historyLines}`, "-t", session])).stdout;
+    if (!Number.isInteger(historyLines) || historyLines < 0 || historyLines > 100_000) throw new TmuxTransportError("Invalid pane history line count");
+    return (await this.execute(["capture-pane", "-p", "-e", ...(historyLines ? ["-S", `-${historyLines}`] : []), "-t", session])).stdout;
   }
 
   async archivePane(session: string, paneLogPath: string, historyLines = 2_000): Promise<string> {
@@ -153,9 +172,9 @@ export class TmuxTransport {
     return capture;
   }
 
-  async interrupt(session: string): Promise<void> {
+  async interrupt(session: string, key: "C-c" | "Escape" = "C-c"): Promise<void> {
     validateSessionName(session);
-    await this.execute(["send-keys", "-t", session, "C-c"]);
+    await this.execute(["send-keys", "-t", session, key]);
   }
 
   async kill(session: string): Promise<boolean> {

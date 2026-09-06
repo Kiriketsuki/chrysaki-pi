@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["extensions/**/*.ts", "tests/**/*.ts"]
+  "include": ["extensions/**/*.ts", "tests/**/*.ts", "scripts/worker-smoke.ts", "scripts/worker-lifecycle-smoke.ts"]
 }

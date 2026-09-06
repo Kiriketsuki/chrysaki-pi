@@ -160,7 +160,10 @@ export class SandboxManager {
 
     const gitMetadata = lease.kind === "git-worktree" ? await gitCommonDirectory(workspace) : undefined;
     if (lease.kind === "git-worktree" && !gitMetadata) throw new SandboxError("Unable to expose read-only Git metadata for worker worktree");
-    const runtimePaths = [...this.defaultRuntimePaths, ...(request.runtimeReadOnlyPaths ?? []), ...(gitMetadata ? [gitMetadata] : [])];
+    // /etc/resolv.conf is often a symlink into /run (systemd-resolved).
+    // Preserve its target without exposing the rest of the host's /run.
+    const resolverPath = await exists("/etc/resolv.conf") ? await realpath("/etc/resolv.conf") : undefined;
+    const runtimePaths = [...this.defaultRuntimePaths, ...(request.runtimeReadOnlyPaths ?? []), ...(gitMetadata ? [gitMetadata] : []), ...(resolverPath ? [resolverPath] : [])];
     const mountedRuntime = new Set<string>();
     for (const requestedPath of runtimePaths) {
       const hostPath = await realpath(requestedPath);

@@ -7,7 +7,7 @@ A responsive Chrysaki Precision interface suite for [Pi](https://github.com/eare
 ## Install
 
 ```bash
-pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.2.11
+pi install git:github.com/Kiriketsuki/chrysaki-pi@v1.2.12
 ```
 
 Select `chrysaki` in `/settings` or set:
@@ -44,6 +44,30 @@ For the intended docked layout, set **TUI mode** to `fullscreen` in Pi's `/setti
 | `/chrysaki-debug` | Benchmark cached footer rendering and show resource counts |
 
 Package prompts: `/chrysaki-review` and `/chrysaki-plan`.
+
+## Interactive workers
+
+`worker_run` delegates through interactive Pi, Claude, or Codex sessions inside
+tmux and Bubblewrap. `worker_spawn`, `worker_wait`, `worker_status`,
+`worker_send`, `worker_reveal`, and `worker_cancel` manage the lifecycle.
+`worker_preflight` checks local routing and confinement without launching jobs;
+it does not verify provider billing or connectivity.
+
+- Pi workers inherit the invoking session's model. An explicit
+  `adapters.pi.model` in `~/.pi/agent/chrysaki-workers.json` takes precedence.
+- Read workers cannot modify the source checkout. Write workers use separate Git
+  worktrees; dirty work is retained for integration rather than deleted.
+- `worker_send` steers active jobs. Completed jobs are immutable; start a new job
+  for further work.
+- Cancellation and timeouts stop the owned sandbox, including tool subprocesses.
+  Captured diagnostics and mailbox files remain until grace cleanup, but the
+  cancelled tmux pane is closed.
+- Successful results require `result.md` and valid terminal `status.json`.
+  Terminal output is diagnostic only.
+
+See [live verification and reproduction commands](docs/testing/workers-live-smoke.md).
+Updating the package does not replace code already loaded in Pi; restart Pi
+before relying on the new worker runtime.
 
 ## Practical Vim subset
 

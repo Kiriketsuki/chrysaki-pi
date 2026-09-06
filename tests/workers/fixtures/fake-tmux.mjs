@@ -21,6 +21,14 @@ if (!fail && command === "-V") {
   const name = valueAfter("-s"); const marker = args.indexOf("--");
   if (state.sessions[name]) { code = 1; stderr = "duplicate session"; }
   else state.sessions[name] = { cwd: valueAfter("-c"), argv: args.slice(marker + 1), options: {}, pastes: [], screen: "fake worker screen\n" };
+} else if (!fail && command === "respawn-pane") {
+  const session = state.sessions[sessionFromTarget(valueAfter("-t"))];
+  if (!session) { code = 1; stderr = "can't find session"; }
+  else { session.argv = args.slice(args.indexOf("--") + 1); session.dead = false; }
+} else if (!fail && command === "display-message") {
+  const session = state.sessions[sessionFromTarget(valueAfter("-t"))];
+  if (!session) { code = 1; stderr = "can't find session"; }
+  else stdout = `${session.dead ? 1 : 0}|${session.exitCode ?? ""}\n`;
 } else if (!fail && command === "set-option") {
   const session = state.sessions[sessionFromTarget(valueAfter("-t"))];
   if (!session) { code = 1; stderr = "can't find session"; }
@@ -41,7 +49,7 @@ if (!fail && command === "-V") {
   if (!session) { code = 1; stderr = "can't find session"; } else stdout = session.screen;
 } else if (!fail && command === "send-keys") {
   const session = state.sessions[sessionFromTarget(valueAfter("-t"))];
-  if (!session) { code = 1; stderr = "can't find session"; } else session.interrupted = args.at(-1) === "C-c";
+  if (!session) { code = 1; stderr = "can't find session"; } else { (session.keys ??= []).push(args.at(-1)); session.interrupted = ["C-c", "Escape"].includes(args.at(-1)); }
 } else if (!fail && command === "has-session") {
   if (!state.sessions[sessionFromTarget(valueAfter("-t"))]) { code = 1; stderr = "can't find session"; }
 } else if (!fail && command === "kill-session") {

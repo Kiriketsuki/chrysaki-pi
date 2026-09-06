@@ -26,6 +26,7 @@ export const WorkerRequestSchema = Type.Object({
   capabilities: Type.Optional(Type.Array(NonEmptyString, { uniqueItems: true })),
   access: Type.Union([Type.Literal("read"), Type.Literal("write")]),
   preferredCli: Type.Optional(Type.Union(WORKER_ADAPTERS.map((id) => Type.Literal(id)))),
+  parentModel: Type.Optional(NonEmptyString),
   allowFallback: Type.Optional(Type.Boolean()),
   cwd: NonEmptyString,
   concurrency: Type.Optional(Type.Integer({ minimum: 1, maximum: 32 })),
@@ -40,6 +41,7 @@ export interface WorkerRequest {
   readonly capabilities: readonly string[];
   readonly access: WorkerAccessMode;
   readonly preferredCli?: WorkerAdapterId;
+  readonly parentModel?: string;
   readonly allowFallback: boolean;
   readonly cwd: string;
   readonly concurrency?: number;
@@ -187,6 +189,7 @@ export interface WorkerAdapter {
   readonly runtimeReadOnlyPaths?: readonly string[];
   authBindings?(): readonly AdapterAuthBinding[];
   sandboxEnvironment?(): Readonly<Record<string, string>>;
+  prepareHome?(homePath: string): Promise<void>;
 }
 
 export interface AdapterLaunchContext {

@@ -15,11 +15,12 @@ async function harness(options: { readonly fakeClock?: boolean; readonly dirtyCl
   const root = await mkdtemp(join(tmpdir(), "chrysaki-broker-")); const source = join(root, "source"); const jobs = join(root, "jobs"); const executable = join(root, "runtime", "pi");
   await import("node:fs/promises").then(({ mkdir }) => Promise.all([mkdir(source), mkdir(join(root, "runtime"))]));
   await writeFile(join(root, "runtime", "package.json"), "{}"); await writeFile(executable, "#!/bin/sh\nexit 0\n"); await chmod(executable, 0o755);
+  const launchContexts: any[] = []; const paneCaptures: number[] = []; const transportInterrupts: any[] = [];
   const interrupts: string[] = []; const prompts: Array<{ session: string; text: string }> = []; let routeCalls = 0; let workspaceActive = 0; let maxWorkspaceActive = 0;
   const adapter: WorkerAdapter = {
     id: "pi", executable,
     async probe() { return { available: true, authenticated: true, sandboxSupported: true, capabilities: ["code"] }; },
-    buildInteractiveArgv(context) { return [context.executablePath]; }, buildPrompt(context) { return context.task; },
+    buildInteractiveArgv(context) { launchContexts.push(context); return [context.executablePath]; }, buildPrompt(context) { return context.task; },
     recognizeScreen() { return { state: "ready" }; }, answerPrompt() { return undefined; },
     async interrupt(context) { interrupts.push(context.jobId); }, completionHelper: "mailbox-instructions",
   };
@@ -49,18 +50,18 @@ async function harness(options: { readonly fakeClock?: boolean; readonly dirtyCl
   const tmux: any = {
     async preflight() { return { available: true, version: "tmux test" }; },
     async launch(request: any) { const name = `chrysaki-${request.jobId}`; sessions.add(name); return { name, jobId: request.jobId, ownerId: request.ownerId }; },
-    async hasSession(name: string) { return sessions.has(name); }, async capturePane() { return "ready"; },
-    async paste(session: string, text: string) { prompts.push({ session, text }); }, async interrupt() {},
+    async hasSession(name: string) { return sessions.has(name); }, async inspectPane(name: string) { return { exists: sessions.has(name), dead: !sessions.has(name) }; }, async capturePane(_name: string, lines: number) { paneCaptures.push(lines); return "ready"; },
+    async paste(session: string, text: string) { prompts.push({ session, text }); }, async interrupt(session: string, key: string) { transportInterrupts.push({ session, key }); },
     async archivePane() { return "diagnostic"; }, async verifyOwnership(name: string, jobId: string, ownerId: string) { return sessions.has(name) && name === `chrysaki-${jobId}` && Boolean(ownerId); }, async terminateOwned(name: string, jobId: string, ownerId: string) { if (options.ownershipFailure || !(await this.verifyOwnership(name, jobId, ownerId))) return false; sessions.delete(name); return true; }, async kill(name: string) { return sessions.delete(name); },
     async reveal(name: string, parent?: string) { return { mode: parent ? "split" : "attach-command", argv: ["tmux", "attach-session", "-t", name], command: `'tmux' 'attach-session' '-t' '${name}'` }; },
   };
   const config = validateWorkerConfig({ concurrency: 1, timeoutMs: 2_000, retentionMs: 10_000, workflows: { wave: { concurrency: 1 } }, ...(options.config ?? {}) });
   const updates: any[] = []; let clock = Date.now();
   const brokerOptions = { config, router, workspaces, sandbox, tmux, jobsRoot: jobs, archiveRoot: join(root, "archive"), startupTimeoutMs: 200, pollIntervalMs: 5, onUpdate: (update: any) => updates.push(update),
-    ...(options.fakeClock ? { now: () => clock, sleep: async (milliseconds: number, signal?: AbortSignal) => { signal?.throwIfAborted(); clock += Math.max(milliseconds, 1_001); } } : {}),
+    ...(options.fakeClock ? { now: () => clock, sleep: async (milliseconds: number, signal?: AbortSignal) => { signal?.throwIfAborted(); clock += Math.max(milliseconds, 1); } } : {}),
   };
   const broker = new WorkerBroker(brokerOptions);
-  return { broker, restart: () => new WorkerBroker(brokerOptions), config, root, source, jobs, adapter, router, workspaces, sandbox, tmux, prompts, interrupts, updates, sessions, cleanedWorkspaces, profileRequests, advance: (milliseconds: number) => { clock += milliseconds; }, get routeCalls() { return routeCalls; }, get maxWorkspaceActive() { return maxWorkspaceActive; } };
+  return { broker, launchContexts, paneCaptures, transportInterrupts, restart: () => new WorkerBroker(brokerOptions), config, root, source, jobs, adapter, router, workspaces, sandbox, tmux, prompts, interrupts, updates, sessions, cleanedWorkspaces, profileRequests, advance: (milliseconds: number) => { clock += milliseconds; }, get routeCalls() { return routeCalls; }, get maxWorkspaceActive() { return maxWorkspaceActive; } };
 }
 
 async function complete(job: WorkerJob, previous: WorkerStatusFile, text: string) {
@@ -72,6 +73,62 @@ async function fail(job: WorkerJob, previous: WorkerStatusFile, message: string)
   const paths = workerMailboxPaths(join(job.mailboxPath, ".."), job.id); const completedAt = new Date(Date.now() + 10).toISOString();
   await writeWorkerStatus(paths, { schemaVersion: WORKER_SCHEMA_VERSION, jobId: job.id, state: "failed", createdAt: previous.createdAt, updatedAt: completedAt, startedAt: previous.startedAt, completedAt, failure: { code: "provider_failed", message, retryable: false } }, previous);
 }
+
+test("Pi inherits the invocation model unless explicitly configured, in both preflight and launch", async () => {
+  for (const pinned of [undefined, "anthropic/pinned-model"]) {
+    const item = await harness({ config: pinned ? { adapters: { pi: { model: pinned } } } : {} });
+    const request = { task: "model", access: "read" as const, cwd: item.source, parentModel: "openai-codex/parent-model" };
+    try {
+      assert.equal((await item.broker.preflight(request)).items[0].model, pinned ?? request.parentModel);
+      const spawned = await item.broker.spawn(request);
+      assert.equal(item.launchContexts[0].model, pinned ?? request.parentModel);
+      assert.equal(spawned.jobs[0].job.request.parentModel, request.parentModel);
+      const metadata = JSON.parse(await readFile(workerMailboxPaths(item.jobs, spawned.jobs[0].job.id).metadata, "utf8"));
+      assert.equal(metadata.launchContract.adapter.model, pinned ?? request.parentModel);
+      assert.ok(item.paneCaptures.length >= 2 && item.paneCaptures.every((lines) => lines === 0));
+      await item.broker.cancel([spawned.jobs[0].job.id]);
+    } finally { item.broker.dispose(); }
+  }
+});
+
+test("retained dead panes fail promptly with diagnostics, never a fallback or pane result", async () => {
+  const item = await harness();
+  try {
+    item.tmux.inspectPane = async () => ({ exists: true, dead: true, exitCode: 7 });
+    item.tmux.capturePane = async () => "fatal: could not open tty\n";
+    const spawned = await item.broker.spawn({ task: "exits immediately", access: "read", cwd: item.source });
+    assert.equal(spawned.jobs[0].status.state, "failed");
+    assert.match(spawned.jobs[0].status.failure!.message, /exit 7.*could not open tty/s);
+    assert.equal(spawned.jobs[0].result, undefined);
+    assert.equal(item.routeCalls, 1);
+    assert.equal(item.sessions.size, 0);
+  } finally { item.broker.dispose(); }
+});
+
+test("recovered cancellation interrupts and terminates the owned sandbox", async () => {
+  const item = await harness();
+  const spawned = await item.broker.spawn({ task: "cancel after reload", access: "read", cwd: item.source });
+  item.broker.dispose(); const replacement = item.restart();
+  try {
+    await replacement.reconcile();
+    await replacement.cancel([spawned.jobs[0].job.id]);
+    assert.deepEqual(item.transportInterrupts, [{ session: spawned.jobs[0].job.tmuxSession, key: "Escape" }]);
+    assert.equal(item.sessions.size, 0);
+  } finally { replacement.dispose(); }
+});
+
+test("reload settles a monitor query rejected during runtime disposal", async () => {
+  const item = await harness();
+  await item.broker.reconcile();
+  await item.broker.spawn({ task: "in-flight monitor", access: "read", cwd: item.source });
+  let rejectQuery: ((error: Error) => void) | undefined;
+  item.tmux.inspectPane = () => new Promise((_resolve, reject) => { rejectQuery = reject; });
+  while (!rejectQuery) await delay(5);
+  item.broker.dispose();
+  rejectQuery(new Error("process runner disposed"));
+  // node:test treats unhandled rejections as failures, including background work.
+  await delay(30);
+});
 
 test("explicit invocation concurrency overrides workflow/global defaults and scheduler bounds startup", async () => {
   const item = await harness(); const spawned = await item.broker.spawn({ tasks: ["one", "two", "three", "four", "five"], access: "read", cwd: item.source, workflow: "wave", concurrency: 3, capabilities: ["code"] }, { ownerId: "wave-owner" });

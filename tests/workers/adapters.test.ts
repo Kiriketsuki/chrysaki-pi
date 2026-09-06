@@ -56,7 +56,7 @@ test("interactive argv is provider-specific, prompt-free, confined, and independ
   }
   assert.ok(new PiWorkerAdapter().buildInteractiveArgv(launchContext("pi")).includes(piMailboxExtensionPath));
   assert.ok(new ClaudeWorkerAdapter().buildInteractiveArgv(launchContext("claude")).includes("--dangerously-skip-permissions"));
-  assert.deepEqual(new CodexWorkerAdapter().buildInteractiveArgv(launchContext("codex")).slice(1, 5), ["--sandbox", "workspace-write", "--ask-for-approval", "never"]);
+  assert.deepEqual(new CodexWorkerAdapter().buildInteractiveArgv(launchContext("codex")).slice(1, 5), ["--sandbox", "danger-full-access", "--ask-for-approval", "never"]);
   assert.throws(() => new ClaudeWorkerAdapter().buildInteractiveArgv(launchContext("claude", ["--print"])), /worker_run/);
   assert.throws(() => new CodexWorkerAdapter().buildInteractiveArgv(launchContext("codex", ["exec"])), /worker_run/);
 });
@@ -65,7 +65,7 @@ test("external adapters append the authoritative mailbox contract while Pi uses 
   const context = { jobId: createWorkerId(), task: "Do the task", mailboxPath: "/mailbox" };
   assert.equal(new PiWorkerAdapter().buildPrompt(context), "Do the task");
   for (const adapter of [new ClaudeWorkerAdapter(), new CodexWorkerAdapter()]) {
-    const prompt = adapter.buildPrompt(context); assert.match(prompt, /MANDATORY WORKER COMPLETION CONTRACT/); assert.match(prompt, /result\.tmp/); assert.match(prompt, /status\.tmp/); assert.match(prompt, /atomically rename/); assert.match(prompt, new RegExp(context.jobId));
+    const prompt = adapter.buildPrompt(context); assert.match(prompt, /MANDATORY WORKER COMPLETION CONTRACT/); assert.match(prompt, /node \/mailbox\/complete\.mjs \/mailbox\/answer\.txt/); assert.match(prompt, /atomically writes result\.md and strict status\.json/); assert.doesNotMatch(prompt, /status\.tmp/); assert.match(prompt, new RegExp(context.jobId));
   }
 });
 
@@ -82,6 +82,32 @@ for (const provider of ["pi", "claude", "codex"] as const) test(`${provider} fix
 
 test("Pi recognizes the modern full-screen editor as ready", async () => {
   assert.equal(new PiWorkerAdapter().recognizeScreen(await screen("pi", "ready-modern")).state, "ready");
+});
+
+test("modern Claude and Codex editors are recognized without accepting loading screens", () => {
+  assert.equal(new ClaudeWorkerAdapter().recognizeScreen('Claude Code v2.1.263\n❯ Try "fix typecheck errors"\n────────────────').state, "ready");
+  const codex = new CodexWorkerAdapter();
+  assert.equal(codex.recognizeScreen("model: loading\n› Ask Codex to do anything").state, "starting");
+  assert.equal(codex.recognizeScreen("model: gpt-test\n› Ask Codex to do anything").state, "ready");
+  const trust = codex.recognizeScreen("Do you trust the contents of this directory?\n› 1. Yes, continue\nPress enter to continue");
+  assert.equal(trust.promptId, "workspace-trust");
+  assert.equal(codex.answerPrompt(trust, { confinementActive: true }), "");
+});
+
+test("ephemeral adapter homes omit host hooks, project settings, and unrelated identity fields", async () => {
+  const host = await mkdtemp(join(tmpdir(), "chrysaki-host-home-"));
+  const home = await mkdtemp(join(tmpdir(), "chrysaki-worker-home-"));
+  const source = { oauthAccount: { accountUuid: "account", emailAddress: "user@example.invalid", unexpected: "secret" }, projects: { "/private": { hooks: ["evil"] } }, hooks: ["evil"] };
+  await writeFile(join(host, ".claude.json"), JSON.stringify(source));
+  await new ClaudeWorkerAdapter({ homeDirectory: host }).prepareHome(home);
+  const config = JSON.parse(await readFile(join(home, ".claude.json"), "utf8"));
+  assert.deepEqual(config.oauthAccount, { accountUuid: "account", emailAddress: "user@example.invalid" });
+  assert.deepEqual(config.projects, { "/workspace": { hasTrustDialogAccepted: true } });
+  assert.equal(config.hooks, undefined);
+  assert.equal(JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8")).remoteControlAtStartup, false);
+  assert.deepEqual(JSON.parse(await readFile(join(host, ".claude.json"), "utf8")), source);
+  await new CodexWorkerAdapter().prepareHome(home);
+  assert.equal(await readFile(join(home, ".codex", "config.toml"), "utf8"), '[projects."/workspace"]\ntrust_level = "trusted"\n');
 });
 
 test("recognized prompt responses are configurable and interrupts delegate to tmux transport", async () => {
